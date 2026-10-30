@@ -1,0 +1,172 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 920" width="1600" height="920" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+<defs><marker id="a-ff6fa8" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#ff6fa8"/></marker><marker id="a-5cf2a6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5cf2a6"/></marker><marker id="a-9b8cff" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9b8cff"/></marker><marker id="a-5ad1ff" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5ad1ff"/></marker><marker id="a-ffb547" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#ffb547"/></marker><marker id="a-ffd166" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#ffd166"/></marker></defs>
+<rect width="1600" height="920" fill="#0b1020"/>
+<text x="40" y="48" font-size="24" font-weight="750" fill="#e8ecf5" text-anchor="start">Adapter-Modell · Symbiot + Connect</text>
+<text x="40" y="74" font-size="14" font-weight="400" fill="#8f99ae" text-anchor="start">Wie Daten von außen hereinkommen – und wer wann entscheidet. Vorschlag E7, mit den Entscheidungen E4, E10, E12.</text>
+<text x="40" y="115" font-size="12" font-weight="700" fill="#9b8cff" text-anchor="start">QUELLEN (AUSSEN)</text>
+<text x="330" y="115" font-size="12" font-weight="700" fill="#5ad1ff" text-anchor="start">HOST</text>
+<text x="820" y="115" font-size="12" font-weight="700" fill="#5cf2a6" text-anchor="start">KETTEN</text>
+<text x="1150" y="115" font-size="12" font-weight="700" fill="#ffd166" text-anchor="start">PROJEKTION &amp; ENTSCHEIDUNG</text>
+<rect x="40" y="135" width="250" height="56" rx="10" fill="#121a30" stroke="#9b8cff" stroke-width="1.6"/>
+<text x="54" y="159" font-size="14" font-weight="700" fill="#9b8cff" text-anchor="start">Kalender</text>
+<text x="54" y="180" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">· ICS · CalDAV</text>
+<rect x="40" y="205" width="250" height="56" rx="10" fill="#121a30" stroke="#9b8cff" stroke-width="1.6"/>
+<text x="54" y="229" font-size="14" font-weight="700" fill="#9b8cff" text-anchor="start">Home Assistant</text>
+<text x="54" y="250" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">· Smart Home · Sensoren</text>
+<rect x="40" y="275" width="250" height="56" rx="10" fill="#121a30" stroke="#9b8cff" stroke-width="1.6"/>
+<text x="54" y="299" font-size="14" font-weight="700" fill="#9b8cff" text-anchor="start">Matrix</text>
+<text x="54" y="320" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">· Nachrichten · Bridges</text>
+<rect x="40" y="345" width="250" height="56" rx="10" fill="#121a30" stroke="#9b8cff" stroke-width="1.6"/>
+<text x="54" y="369" font-size="14" font-weight="700" fill="#9b8cff" text-anchor="start">Web &amp; offene Daten</text>
+<text x="54" y="390" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">· Wetter · ÖPNV · RSS</text>
+<rect x="40" y="415" width="250" height="56" rx="10" fill="#121a30" stroke="#9b8cff" stroke-width="1.6"/>
+<text x="54" y="439" font-size="14" font-weight="700" fill="#9b8cff" text-anchor="start">Fremder MCP-Server</text>
+<text x="54" y="460" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">· nur lesende Tools</text>
+<rect x="40" y="515" width="250" height="80" rx="10" fill="#121a30" stroke="#5cf2a6" stroke-width="1.6"/>
+<text x="54" y="539" font-size="14" font-weight="700" fill="#5cf2a6" text-anchor="start">ESP32-Sensor</text>
+<text x="54" y="560" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">· echtes Gerät mit symbiot-core</text>
+<text x="54" y="578" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">· signiert selbst, kein Adapter</text>
+<rect x="330" y="135" width="450" height="465" rx="14" fill="#0f1830" stroke="#5ad1ff" stroke-width="1.6" stroke-dasharray="6 5"/>
+<text x="346" y="158" font-size="12.5" font-weight="600" fill="#5ad1ff" text-anchor="start">Läuft dort, wo du willst: Gerät · eigener Server · gehostet</text>
+<rect x="350" y="175" width="250" height="150" rx="10" fill="#121a30" stroke="#5ad1ff" stroke-width="1.6"/>
+<text x="364" y="199" font-size="14" font-weight="700" fill="#5ad1ff" text-anchor="start">Adapter (WASM-Sandbox)</text>
+<text x="364" y="220" font-size="12.5" font-weight="400" fill="#e8ecf5" text-anchor="start">describe · check · sync · act</text>
+<text x="364" y="238" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">· sieht keine Schlüssel</text>
+<text x="364" y="256" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">· sieht keine Tokens</text>
+<text x="364" y="274" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">· Limits: Rechenzeit, Speicher, Zeit</text>
+<rect x="620" y="175" width="145" height="150" rx="10" fill="#121a30" stroke="#5ad1ff" stroke-width="1.6"/>
+<text x="634" y="199" font-size="14" font-weight="700" fill="#5ad1ff" text-anchor="start">Manifest</text>
+<text x="634" y="220" font-size="12.5" font-weight="400" fill="#e8ecf5" text-anchor="start">net: 1 Host</text>
+<text x="634" y="238" font-size="12.5" font-weight="400" fill="#e8ecf5" text-anchor="start">kinds: Event</text>
+<text x="634" y="256" font-size="12.5" font-weight="400" fill="#e8ecf5" text-anchor="start">act: none</text>
+<text x="634" y="274" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">· vorab erklärt,</text>
+<text x="634" y="292" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">· sonst gesperrt</text>
+<rect x="350" y="345" width="250" height="72" rx="10" fill="#121a30" stroke="#5ad1ff" stroke-width="1.6"/>
+<text x="364" y="369" font-size="14" font-weight="700" fill="#5ad1ff" text-anchor="start">HTTP-Filter + Tokens</text>
+<text x="364" y="390" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">· nur erlaubte Hosts</text>
+<text x="364" y="408" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">· Token kommt aus dem Schlüsselbund</text>
+<rect x="620" y="345" width="145" height="72" rx="10" fill="#121a30" stroke="#5ad1ff" stroke-width="1.6"/>
+<text x="634" y="369" font-size="14" font-weight="700" fill="#5ad1ff" text-anchor="start">Signierer</text>
+<text x="634" y="390" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">· Adapter-Schlüssel</text>
+<rect x="350" y="437" width="415" height="150" rx="10" fill="#121a30" stroke="#5ad1ff" stroke-width="1.6"/>
+<text x="364" y="461" font-size="14" font-weight="700" fill="#5ad1ff" text-anchor="start">Drei Stufen nach Vertrauen</text>
+<text x="364" y="482" font-size="12.5" font-weight="400" fill="#e8ecf5" text-anchor="start">0  eingebaut – eigener Rust-Code (Dateien, Matrix)</text>
+<text x="364" y="500" font-size="12.5" font-weight="400" fill="#e8ecf5" text-anchor="start">1  Komponente – WASM-Sandbox (Kalender, Home Assistant, Web)</text>
+<text x="364" y="518" font-size="12.5" font-weight="400" fill="#e8ecf5" text-anchor="start">2  extern – fremder Dienst, nur über einen Adapter der Stufe 0/1</text>
+<text x="364" y="536" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">·  Der fremde Dienst bekommt nie einen Symbiot-Schlüssel.</text>
+<polyline points="290,380 350,380" fill="none" stroke="#9b8cff" stroke-width="1.8" marker-end="url(#a-9b8cff)"/>
+<polyline points="350,395 290,395" fill="none" stroke="#9b8cff" stroke-width="1.8" marker-end="url(#a-9b8cff)"/>
+<text x="320" y="372" font-size="11" font-weight="600" fill="#9b8cff" text-anchor="middle">abrufen</text>
+<polyline points="475,325 475,345" fill="none" stroke="#5ad1ff" stroke-width="1.8" marker-end="url(#a-5ad1ff)"/>
+<polyline points="600,300 610,300 610,395 620,395" fill="none" stroke="#5ad1ff" stroke-width="1.8" marker-end="url(#a-5ad1ff)"/>
+<text x="692" y="431" font-size="11.5" font-weight="600" fill="#5ad1ff" text-anchor="middle">emit(beleg) → signieren</text>
+<rect x="820" y="135" width="290" height="130" rx="10" fill="#121a30" stroke="#5cf2a6" stroke-width="1.6"/>
+<text x="834" y="159" font-size="14" font-weight="700" fill="#5cf2a6" text-anchor="start">Kette des Adapters</text>
+<text x="834" y="180" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">· z. B. kalender-privat@heimserver</text>
+<rect x="836" y="185" width="58" height="30" rx="5" fill="#0b1020" stroke="#5cf2a6" stroke-width="1.3"/>
+<text x="865.0" y="204" font-size="11" font-weight="600" fill="#e8ecf5" text-anchor="middle">Beleg</text>
+<rect x="906" y="185" width="58" height="30" rx="5" fill="#0b1020" stroke="#5cf2a6" stroke-width="1.3"/>
+<text x="935.0" y="204" font-size="11" font-weight="600" fill="#e8ecf5" text-anchor="middle">Beleg</text>
+<line x1="894" y1="200" x2="906" y2="200" stroke="#5cf2a6" stroke-width="1.3"/>
+<rect x="976" y="185" width="58" height="30" rx="5" fill="#0b1020" stroke="#5cf2a6" stroke-width="1.3"/>
+<text x="1005.0" y="204" font-size="11" font-weight="600" fill="#e8ecf5" text-anchor="middle">Beleg</text>
+<line x1="964" y1="200" x2="976" y2="200" stroke="#5cf2a6" stroke-width="1.3"/>
+<rect x="1046" y="185" width="58" height="30" rx="5" fill="#0b1020" stroke="#5cf2a6" stroke-width="1.3"/>
+<text x="1075.0" y="204" font-size="11" font-weight="600" fill="#e8ecf5" text-anchor="middle">Beleg</text>
+<line x1="1034" y1="200" x2="1046" y2="200" stroke="#5cf2a6" stroke-width="1.3"/>
+<text x="836" y="240" font-size="11.5" font-weight="400" fill="#8f99ae" text-anchor="start">+ Hash des Adapter-Codes · nur Beobachtungen</text>
+<polyline points="765,380 795,380 795,200 820,200" fill="none" stroke="#5cf2a6" stroke-width="1.8" marker-end="url(#a-5cf2a6)"/>
+<rect x="820" y="290" width="290" height="190" rx="10" fill="#121a30" stroke="#ffb547" stroke-width="1.6"/>
+<text x="834" y="314" font-size="14" font-weight="700" fill="#ffb547" text-anchor="start">Meine Kette</text>
+<text x="834" y="335" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">· Gerät des Menschen – nur du signierst hier</text>
+<rect x="836" y="342" width="72" height="30" rx="5" fill="#0b1020" stroke="#ffb547" stroke-width="1.3"/>
+<text x="872.0" y="361" font-size="11" font-weight="600" fill="#e8ecf5" text-anchor="middle">Grant</text>
+<rect x="920" y="342" width="72" height="30" rx="5" fill="#0b1020" stroke="#ffb547" stroke-width="1.3"/>
+<text x="956.0" y="361" font-size="11" font-weight="600" fill="#e8ecf5" text-anchor="middle">Vertraut</text>
+<line x1="908" y1="357" x2="920" y2="357" stroke="#ffb547" stroke-width="1.3"/>
+<rect x="1004" y="342" width="72" height="30" rx="5" fill="#0b1020" stroke="#ffb547" stroke-width="1.3"/>
+<text x="1040.0" y="361" font-size="11" font-weight="600" fill="#e8ecf5" text-anchor="middle">Policy</text>
+<line x1="992" y1="357" x2="1004" y2="357" stroke="#ffb547" stroke-width="1.3"/>
+<rect x="836" y="388" width="72" height="30" rx="5" fill="#0b1020" stroke="#ffb547" stroke-width="1.3"/>
+<text x="872.0" y="407" font-size="11" font-weight="600" fill="#e8ecf5" text-anchor="middle">Knoten</text>
+<rect x="920" y="388" width="72" height="30" rx="5" fill="#0b1020" stroke="#ffb547" stroke-width="1.3"/>
+<text x="956.0" y="407" font-size="11" font-weight="600" fill="#e8ecf5" text-anchor="middle">Kante</text>
+<line x1="908" y1="403" x2="920" y2="403" stroke="#ffb547" stroke-width="1.3"/>
+<rect x="1004" y="388" width="72" height="30" rx="5" fill="#0b1020" stroke="#ffb547" stroke-width="1.3"/>
+<text x="1040.0" y="407" font-size="11" font-weight="600" fill="#e8ecf5" text-anchor="middle">Revoke</text>
+<line x1="992" y1="403" x2="1004" y2="403" stroke="#ffb547" stroke-width="1.3"/>
+<text x="836" y="445" font-size="11.5" font-weight="400" fill="#8f99ae" text-anchor="start">Grant = Freigabe: Rechte, Ort, Ablaufdatum</text>
+<text x="836" y="463" font-size="11.5" font-weight="400" fill="#8f99ae" text-anchor="start">Revoke = Widerruf · Vertraut = E10</text>
+<rect x="820" y="505" width="290" height="95" rx="10" fill="#121a30" stroke="#5cf2a6" stroke-width="1.6"/>
+<text x="834" y="529" font-size="14" font-weight="700" fill="#5cf2a6" text-anchor="start">Kette des Sensors</text>
+<rect x="836" y="545" width="72" height="30" rx="5" fill="#0b1020" stroke="#5cf2a6" stroke-width="1.3"/>
+<text x="872.0" y="564" font-size="11" font-weight="600" fill="#e8ecf5" text-anchor="middle">Messung</text>
+<rect x="920" y="545" width="72" height="30" rx="5" fill="#0b1020" stroke="#5cf2a6" stroke-width="1.3"/>
+<text x="956.0" y="564" font-size="11" font-weight="600" fill="#e8ecf5" text-anchor="middle">Messung</text>
+<line x1="908" y1="560" x2="920" y2="560" stroke="#5cf2a6" stroke-width="1.3"/>
+<rect x="1004" y="545" width="72" height="30" rx="5" fill="#0b1020" stroke="#5cf2a6" stroke-width="1.3"/>
+<text x="1040.0" y="564" font-size="11" font-weight="600" fill="#e8ecf5" text-anchor="middle">Bündel</text>
+<line x1="992" y1="560" x2="1004" y2="560" stroke="#5cf2a6" stroke-width="1.3"/>
+<polyline points="165,595 165,618 800,618 800,575 820,575" fill="none" stroke="#5cf2a6" stroke-width="1.8" marker-end="url(#a-5cf2a6)"/>
+<text x="480" y="634" font-size="11.5" font-weight="600" fill="#5cf2a6" text-anchor="middle">signiert selbst · MQTT nur Transport</text>
+<rect x="1150" y="135" width="410" height="56" rx="10" fill="#1a1a14" stroke="#ffd166" stroke-width="1.6"/>
+<text x="1164" y="159" font-size="14" font-weight="700" fill="#ffd166" text-anchor="start">① Gültige Freigabe?</text>
+<text x="1164" y="180" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">· Grant vorhanden und nicht widerrufen – sonst ignoriert</text>
+<polyline points="1110,170 1150,170" fill="none" stroke="#5cf2a6" stroke-width="1.8" marker-end="url(#a-5cf2a6)"/>
+<polyline points="1110,350 1130,350 1130,185 1150,185" fill="none" stroke="#ffb547" stroke-width="1.8" stroke-dasharray="6 5" marker-end="url(#a-ffb547)"/>
+<rect x="1150" y="208" width="410" height="40" rx="10" fill="#121a30" stroke="#5ad1ff" stroke-width="1.6"/>
+<text x="1164" y="233" font-size="12.5" font-weight="600" fill="#e8ecf5" text-anchor="start">Beleg sichtbar – Herkunft bis zur Quelle prüfbar</text>
+<polyline points="1355,191 1355,208" fill="none" stroke="#ffd166" stroke-width="1.8" marker-end="url(#a-ffd166)"/>
+<rect x="1150" y="266" width="410" height="56" rx="10" fill="#1a1a14" stroke="#ffd166" stroke-width="1.6"/>
+<text x="1164" y="290" font-size="14" font-weight="700" fill="#ffd166" text-anchor="start">② Adapter vertraut?  (E10)</text>
+<text x="1164" y="311" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">· Standard: nein</text>
+<polyline points="1355,248 1355,266" fill="none" stroke="#ffd166" stroke-width="1.8" marker-end="url(#a-ffd166)"/>
+<rect x="1150" y="340" width="198" height="62" rx="10" fill="#121a30" stroke="#ffb547" stroke-width="1.6"/>
+<text x="1162" y="362" font-size="12" font-weight="600" fill="#e8ecf5" text-anchor="start">ja → Knoten automatisch,</text>
+<text x="1162" y="380" font-size="12" font-weight="600" fill="#e8ecf5" text-anchor="start">gekennzeichnet</text>
+<rect x="1362" y="340" width="198" height="62" rx="10" fill="#121a30" stroke="#ffb547" stroke-width="1.6"/>
+<text x="1374" y="362" font-size="12" font-weight="600" fill="#e8ecf5" text-anchor="start">nein → Vorschlag,</text>
+<text x="1374" y="380" font-size="12" font-weight="600" fill="#e8ecf5" text-anchor="start">du klickst</text>
+<polyline points="1250,322 1250,340" fill="none" stroke="#ffd166" stroke-width="1.8" marker-end="url(#a-ffd166)"/>
+<polyline points="1460,322 1460,340" fill="none" stroke="#ffd166" stroke-width="1.8" marker-end="url(#a-ffd166)"/>
+<rect x="1150" y="422" width="410" height="56" rx="10" fill="#1a1a14" stroke="#ffd166" stroke-width="1.6"/>
+<text x="1164" y="446" font-size="14" font-weight="700" fill="#ffd166" text-anchor="start">③ Text als Anweisung an die KI?  (E12)</text>
+<text x="1164" y="467" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">· nur aus vertrautem Adapter/Knoten, sonst nur zitierte Daten</text>
+<polyline points="1355,402 1355,422" fill="none" stroke="#ffd166" stroke-width="1.8" marker-end="url(#a-ffd166)"/>
+<rect x="1150" y="498" width="410" height="44" rx="10" fill="#121a30" stroke="#ff6fa8" stroke-width="1.6"/>
+<text x="1164" y="525" font-size="12.5" font-weight="600" fill="#e8ecf5" text-anchor="start">KI (lokal über LiteLLM) → Vorschlag mit Quellen</text>
+<polyline points="1355,478 1355,498" fill="none" stroke="#ffd166" stroke-width="1.8" marker-end="url(#a-ffd166)"/>
+<rect x="1150" y="560" width="410" height="44" rx="10" fill="#121a30" stroke="#ffb547" stroke-width="1.6"/>
+<text x="1164" y="587" font-size="12.5" font-weight="600" fill="#e8ecf5" text-anchor="start">Du entscheidest → signiert in „Meine Kette“</text>
+<polyline points="1355,542 1355,560" fill="none" stroke="#ff6fa8" stroke-width="1.8" marker-end="url(#a-ff6fa8)"/>
+<polyline points="1150,582 1125,582 1125,470 1110,470" fill="none" stroke="#ffb547" stroke-width="1.8" marker-end="url(#a-ffb547)"/>
+<rect x="40" y="660" width="560" height="120" rx="10" fill="#121a30" stroke="#ff6fa8" stroke-width="1.6"/>
+<text x="54" y="684" font-size="14" font-weight="700" fill="#ff6fa8" text-anchor="start">Anzeige-Plugins</text>
+<text x="54" y="705" font-size="12.5" font-weight="400" fill="#e8ecf5" text-anchor="start">A  deklarativ: Plugin beschreibt die Ansicht, Symbiot zeichnet sie (zuerst)</text>
+<text x="54" y="723" font-size="12.5" font-weight="400" fill="#e8ecf5" text-anchor="start">B  eigenes HTML im abgeschotteten iframe (Standard „MCP Apps“)</text>
+<text x="54" y="741" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">·  beide nur lesend – jede Aktion wird ein Vorschlag</text>
+<rect x="620" y="660" width="490" height="120" rx="10" fill="#121a30" stroke="#ff6fa8" stroke-width="1.6"/>
+<text x="634" y="684" font-size="14" font-weight="700" fill="#ff6fa8" text-anchor="start">Symbiot als MCP-Server</text>
+<text x="634" y="705" font-size="12.5" font-weight="400" fill="#e8ecf5" text-anchor="start">fremde KI-Agenten dürfen suchen, lesen, vorschlagen</text>
+<text x="634" y="723" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">·  keine Schreib-Werkzeuge – nie direkt in eine Kette</text>
+<text x="634" y="741" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">·  fremde MCP-Server nur lesend, als Adapter der Stufe 2</text>
+<rect x="1150" y="660" width="410" height="120" rx="10" fill="#121a30" stroke="#ffd166" stroke-width="1.6"/>
+<text x="1164" y="684" font-size="14" font-weight="700" fill="#ffd166" text-anchor="start">Immer ein Klick</text>
+<text x="1164" y="705" font-size="12.5" font-weight="400" fill="#e8ecf5" text-anchor="start">Handeln nach außen (act: Mail senden, Licht schalten)</text>
+<text x="1164" y="723" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">·  auch bei vertrauten Adaptern</text>
+<text x="1164" y="741" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">·  Belege, die eine Sensibilitäts-Regel treffen (E4)</text>
+<text x="40" y="820" font-size="13" font-weight="400" fill="#8f99ae" text-anchor="start">Ort ist Einstellung: Jeder Adapter läuft dort, wo der Mensch es festlegt. Empfehlung: sensible Quellen nur auf dem Gerät oder dem eigenen Server – gehostet sieht der Host die Daten im Klartext.</text>
+<text x="40" y="844" font-size="13" font-weight="400" fill="#8f99ae" text-anchor="start">Ein Adapter ist für den Kern ein Gerät wie jedes andere: eigener Schlüssel, eigene Kette mit genau einem Schreiber – Sync, Prüfen und Projektion bleiben unverändert.</text>
+<rect x="40" y="872" width="14" height="14" rx="3" fill="#9b8cff"/>
+<text x="62" y="884" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">Quelle</text>
+<rect x="190" y="872" width="14" height="14" rx="3" fill="#5ad1ff"/>
+<text x="212" y="884" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">Host/Adapter</text>
+<rect x="340" y="872" width="14" height="14" rx="3" fill="#5cf2a6"/>
+<text x="362" y="884" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">Kette</text>
+<rect x="490" y="872" width="14" height="14" rx="3" fill="#ffb547"/>
+<text x="512" y="884" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">Mensch</text>
+<rect x="640" y="872" width="14" height="14" rx="3" fill="#ff6fa8"/>
+<text x="662" y="884" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">KI/Plugins</text>
+<rect x="790" y="872" width="14" height="14" rx="3" fill="#ffd166"/>
+<text x="812" y="884" font-size="12.5" font-weight="400" fill="#8f99ae" text-anchor="start">Prüfung</text>
+</svg>
