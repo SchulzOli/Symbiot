@@ -24,7 +24,8 @@ Erst danach wird das Skelett dicker. Jeder Meilenstein endet mit einem **Checkpo
 ## Meilensteine
 
 ### M0 — Fundament
-- Cargo-Workspace mit `crates/symbiot-core`, `apps/server`, `apps/ui`, `apps/desktop` (anfangs leer, aber baubar).
+- Cargo-Workspace mit `crates/symbiot-core` (`no_std`), `apps/server` (`/health`), `apps/ui` (Leptos-Startseite).
+  `apps/desktop` (Tauri) kommt mit M1, wenn es etwas zum Einpacken gibt.
 - CI `ci.yml`: fmt, clippy, Tests, `no_std`-Build des Kerns, WASM-Build der UI.
 - Lizenz (MIT), README, diese Dokumente, Issue-Vorlagen, Milestones M0–M6 auf GitHub.
 

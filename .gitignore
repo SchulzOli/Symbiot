@@ -1,0 +1,6 @@
+/target
+/apps/ui/dist
+*.db
+*.db-wal
+*.db-shm
+/data
