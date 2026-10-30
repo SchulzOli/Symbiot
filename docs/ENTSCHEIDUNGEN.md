@@ -110,6 +110,10 @@ Alternative, falls SQLCipher in Tauri mobil Probleme macht: Inhalte vor dem Spei
 Wie kommen Kalender, Nachrichten, Geräte im Haus, Gesundheitsdaten und andere Apps herein, und wie sehen
 Anzeige-Plugins aus? Wir wollen auf dem Stand der Technik sein. Recherche: [RECHERCHE-ADAPTER.md](RECHERCHE-ADAPTER.md).
 
+Bild: [adapter-modell.svg](adapter-modell.svg).
+
+![Adapter-Modell](adapter-modell.svg)
+
 Kern der Empfehlung, zur Entscheidung: **Ein Adapter ist ein Gerät** mit eigenem Schlüssel und eigener Kette.
 Fremde Adapter laufen als WebAssembly-Komponenten (wasmtime) mit vorab erklärten Rechten; der Host signiert,
 nicht der Adapter. Der Mensch erteilt und widerruft Zugriffe als Einträge in seiner Kette. Adapter beobachten
@@ -125,6 +129,26 @@ Matrix lesend, dazu ein MCP-Server von Symbiot (nur lesen und vorschlagen).
 - **Vorschlag zur Abgrenzung:** Vertrauen gilt nur für das Anlegen von Knoten. Handlungen nach außen (Mail
   senden, Licht schalten) bleiben immer ein Klick, und Belege, die eine Sensibilitäts-Regel (E4) treffen,
   ebenso.
+
+## E11 — Dünne Bibliotheken: selbst bauen und beitragen · *entschieden*
+
+Wo Rust-Bibliotheken fehlen oder dünn sind (z. B. CalDAV, JMAP), bauen wir sie in einem eigenen Repo oder
+forken bestehende und tragen die Verbesserungen zurück (Upstream-Beiträge). Welche Bibliotheken genau, wird
+beim ersten Adapter (Kalender) geprüft. Eigene Repos und Forks legt erst an, wer Oliver vorher gefragt hat.
+
+## E12 — Texte von außen und die KI · *entschieden*
+
+- Texte von außen kommen **immer über einen Adapter** in das System – ganz oder für einzelne Knoten.
+- Bevor aus solchem Text eine **Anweisung an die KI** werden kann, muss der Adapter bzw. der Knoten
+  **vertraut** sein (E10). Nicht vertrauter Text erreicht die KI nur als zitierte Daten, deutlich vom
+  Auftrag getrennt.
+- Auch bei vertrautem Text gilt weiter: Die KI schlägt nur vor, der Mensch entscheidet. Vertrauen öffnet also
+  den Weg zur KI, nicht den Weg zu Handlungen.
+
+## E13 — Regeln fürs Bündeln · *offen, Recherche läuft*
+
+Sensoren und Adapter erzeugen viele Einträge. Gesucht sind Regeln für Bündeln, Aufbewahren und Checkpoints,
+die die Prüfbarkeit erhalten. Recherche: `docs/RECHERCHE-BUENDELN.md`.
 
 ## E8 — Zurückgestellt · *entschieden*
 
