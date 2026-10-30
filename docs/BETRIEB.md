@@ -27,6 +27,14 @@ Tag vX.Y.Z ─► Release: Installer für Windows, Linux, macOS als GitHub Relea
 
 ## Einmalig einrichten (von Hand, braucht deine Anmeldungen)
 
+0. **Stack anlegen:** [deploy/install.sh](../deploy/install.sh) mit `compose.yaml` nach heimserver kopieren und mit sudo starten.
+   Das Skript legt `/opt/stacks/symbiot` an, trägt Port 8449 in `tailscale serve` ein (mit Sicherung) und startet den Container.
+   ```bash
+   scp deploy/compose.yaml deploy/install.sh heimserver:symbiot-deploy/
+   ```
+   ```bash
+   ssh -t heimserver 'sudo bash ~/symbiot-deploy/install.sh'
+   ```
 1. **Komodo:** Stack `symbiot` als *Files on Server* anlegen, Server `heimserver`, Run Directory `/opt/stacks/symbiot`.
    Danach *Poll for Updates* und *Auto Update* einschalten.
 2. **GHCR:** Ist das Paket `symbiot-server` privat, unter *GitHub → Packages → symbiot-server → Package settings* auf **Public** stellen.
