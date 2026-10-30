@@ -15,6 +15,16 @@ Hervorgegangen aus dem Ideengarten *TrustInAI*. Benannt nach der *Symbiose Mensc
 - [docs/TECH-STACK.md](docs/TECH-STACK.md): Stack, Architektur, Entwicklungsumgebung
 - [docs/PLAN.md](docs/PLAN.md): Meilensteine M0–M6, Lifecycle, Checkpoints
 - [docs/FEATURES.md](docs/FEATURES.md): erste Features F1–F7 mit Abnahmekriterien
+- [docs/BETRIEB.md](docs/BETRIEB.md): Weg eines Commits bis heimserver, Release, Einrichtung, Prüfen
+
+## Aufbau
+| Teil | Rolle |
+|---|---|
+| `crates/symbiot-core` | `no_std`-Kern: Knoten, signierte Hash-Kette, Prüfung, Projektion |
+| `crates/symbiot-store` | SQLite: Kette als Wahrheit, Knoten als Projektion, Geräteschlüssel |
+| `apps/ui` | Leptos-Oberfläche, im Browser über `/api`, in Tauri über `invoke` |
+| `apps/desktop` | Tauri 2: Windows, macOS, Linux (später Android, iOS), Daten lokal |
+| `apps/server` | axum auf heimserver: API, liefert die UI aus, `/health` |
 
 ## Entwickeln
 Voraussetzungen und Einrichtung: [docs/TECH-STACK.md](docs/TECH-STACK.md#entwicklungsumgebung-windows-pc).
@@ -22,16 +32,23 @@ Voraussetzungen und Einrichtung: [docs/TECH-STACK.md](docs/TECH-STACK.md#entwick
 ```bash
 cargo test --workspace
 ```
+Web: Server und UI getrennt starten. Die UI leitet `/api` noch nicht weiter, deshalb nach `trunk build` die UI über den Server öffnen:
 ```bash
-cargo run -p symbiot-server
+cd apps/ui && trunk build
 ```
 ```bash
-cd apps/ui && trunk serve
+SYMBIOT_UI=apps/ui/dist cargo run -p symbiot-server
 ```
-Der Server antwortet unter `http://127.0.0.1:8100/health`, die UI unter `http://127.0.0.1:8080`.
+Dann `http://127.0.0.1:8100` öffnen.
+
+Desktop mit Hot Reload:
+```bash
+cd apps/desktop && cargo tauri dev
+```
 
 ## Status
-- **M0 Fundament:** in Arbeit
+- **M0 Fundament:** fertig
+- **M1 Walking Skeleton:** in Arbeit
 
 ## Lizenz
 MIT
