@@ -1,0 +1,19 @@
+# Symbiot auf sz (angelegt per Claude, 2026-10-30)
+# Ziel: /opt/stacks/symbiot/compose.yaml, in Komodo als "Files on Server" registriert
+# (Run Directory /opt/stacks/symbiot, "Poll for Updates" + "Auto Update" an → zieht :main selbst).
+#   unterwegs + zu Hause:  https://sz.tailacb899.ts.net:8449  (tailscale serve im Stack tailscale)
+#   nur lokal auf sz:      http://127.0.0.1:8100
+# Daten: ./data (SQLite + device.key = Identität des Servers, gehört uid 65532). Ins Backup aufnehmen.
+name: symbiot
+services:
+  symbiot:
+    image: ghcr.io/schulzoli/symbiot-server:main
+    container_name: symbiot
+    restart: unless-stopped
+    network_mode: host                    # tailscale serve erreicht 127.0.0.1:8100, später LiteLLM auf 127.0.0.1:8085
+    environment:
+      SYMBIOT_ADDR: "127.0.0.1:8100"      # nur lokal; von außen nur über Tailscale-HTTPS
+      RUST_LOG: info
+      TZ: Europe/Berlin
+    volumes:
+      - ./data:/data

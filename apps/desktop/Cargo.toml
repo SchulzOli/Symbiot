@@ -1,0 +1,20 @@
+[package]
+name = "symbiot-desktop"
+description = "Symbiot — Tauri shell for desktop and mobile around the shared Leptos UI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "symbiot_desktop_lib"
+# staticlib/cdylib are needed for Android and iOS (M5).
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+symbiot-core = { version = "0.1.0", path = "../../crates/symbiot-core" }
+symbiot-store = { version = "0.1.0", path = "../../crates/symbiot-store" }
+tauri = { version = "2.12.5", features = [] }

@@ -1,0 +1,5 @@
+target
+apps/ui/dist
+.git
+data
+**/*.db*
