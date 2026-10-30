@@ -100,10 +100,16 @@ abgeleitet. **Empfehlung: SQLite behalten und verschlüsseln, keine neue Datenba
 Alternative, falls SQLCipher in Tauri mobil Probleme macht: Inhalte vor dem Speichern einzeln verschlüsseln
 (z. B. XChaCha20-Poly1305). Mehr Arbeit, aber unabhängig von der Datenbank.
 
-## E7 — Adapter und Plugins · *offen, Recherche läuft*
+## E7 — Adapter und Plugins · *offen, Recherche liegt vor*
 
 Wie kommen Kalender, Nachrichten, Geräte im Haus, Gesundheitsdaten und andere Apps herein, und wie sehen
-Anzeige-Plugins aus? Wir wollen auf dem Stand der Technik sein. Recherche: `docs/RECHERCHE-ADAPTER.md`.
+Anzeige-Plugins aus? Wir wollen auf dem Stand der Technik sein. Recherche: [RECHERCHE-ADAPTER.md](RECHERCHE-ADAPTER.md).
+
+Kern der Empfehlung, zur Entscheidung: **Ein Adapter ist ein Gerät** mit eigenem Schlüssel und eigener Kette.
+Fremde Adapter laufen als WebAssembly-Komponenten (wasmtime) mit vorab erklärten Rechten; der Host signiert,
+nicht der Adapter. Der Mensch erteilt und widerruft Zugriffe als Einträge in seiner Kette. Adapter beobachten
+nur; was daraus eigene Knoten oder Handlungen werden, bleibt ein Vorschlag. Zuerst: Kalender, Home Assistant,
+Matrix lesend, dazu ein MCP-Server von Symbiot (nur lesen und vorschlagen).
 
 ## E8 — Zurückgestellt · *entschieden*
 
