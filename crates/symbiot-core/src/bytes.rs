@@ -96,15 +96,30 @@ byte_newtype!(
     NodeId, 16
 );
 
+byte_newtype!(
+    /// Stable edge id: the first 16 bytes of the hash of the entry that created it.
+    EdgeId, 16
+);
+
 impl Hash {
     /// `prev` of the first entry in every chain.
     pub const ZERO: Hash = Hash([0; 32]);
+
+    fn prefix16(&self) -> [u8; 16] {
+        let mut id = [0u8; 16];
+        id.copy_from_slice(&self.0[..16]);
+        id
+    }
 }
 
 impl NodeId {
     pub fn from_entry_hash(h: &Hash) -> Self {
-        let mut id = [0u8; 16];
-        id.copy_from_slice(&h.0[..16]);
-        NodeId(id)
+        NodeId(h.prefix16())
+    }
+}
+
+impl EdgeId {
+    pub fn from_entry_hash(h: &Hash) -> Self {
+        EdgeId(h.prefix16())
     }
 }

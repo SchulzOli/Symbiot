@@ -3,7 +3,7 @@
 
 use std::sync::Mutex;
 
-use symbiot_core::{Node, NodeKind, VerifyReport};
+use symbiot_core::{Edge, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, VerifyReport};
 use symbiot_store::Store;
 use tauri::{Manager, State};
 
@@ -32,6 +32,36 @@ fn create_node(
 }
 
 #[tauri::command]
+fn update_node(
+    store: State<AppStore>,
+    id: NodeId,
+    title: String,
+    body: String,
+) -> Result<Node, String> {
+    store.with(|s| s.update_node(id, &title, &body))
+}
+
+#[tauri::command]
+fn node_history(store: State<AppStore>, id: NodeId) -> Result<Vec<LedgerEntry>, String> {
+    store.with(|s| s.history(id))
+}
+
+#[tauri::command]
+fn list_edges(store: State<AppStore>) -> Result<Vec<Edge>, String> {
+    store.with(|s| s.edges())
+}
+
+#[tauri::command]
+fn link_nodes(
+    store: State<AppStore>,
+    from: NodeId,
+    to: NodeId,
+    kind: EdgeKind,
+) -> Result<Edge, String> {
+    store.with(|s| s.link(from, to, kind))
+}
+
+#[tauri::command]
 fn verify_ledger(store: State<AppStore>) -> Result<VerifyReport, String> {
     store.with(|s| s.verify())
 }
@@ -48,6 +78,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_nodes,
             create_node,
+            update_node,
+            node_history,
+            list_edges,
+            link_nodes,
             verify_ledger
         ])
         .run(tauri::generate_context!())

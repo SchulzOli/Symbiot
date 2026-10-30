@@ -3,12 +3,15 @@
 //! The ledger table is the truth; the nodes table is a projection of it,
 //! updated in the same transaction as every append.
 
+use std::collections::HashMap;
 use std::io;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OptionalExtension, params};
-use symbiot_core::{LedgerEntry, Node, NodeId, NodeKind, Op, PubKey, Signer};
+use symbiot_core::{
+    ApplyError, Change, Edge, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Op, PubKey, Signer,
+};
 
 pub use symbiot_core::VerifyReport;
 
@@ -92,7 +95,16 @@ impl Store {
                  updated_ms INTEGER NOT NULL,
                  node       BLOB NOT NULL
              );
-             CREATE INDEX IF NOT EXISTS nodes_kind ON nodes (kind, updated_ms);",
+             CREATE INDEX IF NOT EXISTS nodes_kind ON nodes (kind, updated_ms);
+             CREATE TABLE IF NOT EXISTS edges (
+                 id         BLOB PRIMARY KEY,
+                 from_id    BLOB NOT NULL,
+                 to_id      BLOB NOT NULL,
+                 kind       TEXT NOT NULL,
+                 created_ms INTEGER NOT NULL,
+                 edge       BLOB NOT NULL,
+                 UNIQUE (from_id, to_id, kind)
+             );",
         )?;
         Ok(Store { conn, signer })
     }
@@ -107,11 +119,14 @@ impl Store {
         if title.is_empty() {
             return Err(Error::Invalid("Titel darf nicht leer sein"));
         }
-        self.append(Op::CreateNode {
+        match self.append(Op::CreateNode {
             kind,
             title: title.into(),
             body: body.into(),
-        })
+        })? {
+            Change::Node(n) => Ok(n),
+            Change::Edge(_) => unreachable!("CreateNode yields a node"),
+        }
     }
 
     /// Editing appends a new entry; earlier versions stay in the ledger.
@@ -120,14 +135,25 @@ impl Store {
         if title.is_empty() {
             return Err(Error::Invalid("Titel darf nicht leer sein"));
         }
-        self.append(Op::UpdateNode {
+        match self.append(Op::UpdateNode {
             node: id,
             title: title.into(),
             body: body.into(),
-        })
+        })? {
+            Change::Node(n) => Ok(n),
+            Change::Edge(_) => unreachable!("UpdateNode yields a node"),
+        }
     }
 
-    fn append(&mut self, op: Op) -> Result<Node> {
+    /// Connects two nodes, e.g. „Beleg stützt Ziel“.
+    pub fn link(&mut self, from: NodeId, to: NodeId, kind: EdgeKind) -> Result<Edge> {
+        match self.append(Op::Link { from, to, kind })? {
+            Change::Edge(e) => Ok(e),
+            Change::Node(_) => unreachable!("Link yields an edge"),
+        }
+    }
+
+    fn append(&mut self, op: Op) -> Result<Change> {
         let author = self.device();
         let tx = self.conn.transaction()?;
 
@@ -141,10 +167,34 @@ impl Store {
             .map(|b| postcard::from_bytes(&b))
             .transpose()?;
 
+        // Load what the core rules need, then let the core decide (same rules on every platform).
+        let referenced: Vec<NodeId> = match &op {
+            Op::CreateNode { .. } => vec![],
+            Op::UpdateNode { node, .. } => vec![*node],
+            Op::Link { from, to, .. } => vec![*from, *to],
+        };
+        let mut known = HashMap::new();
+        for id in referenced {
+            if let Some(n) = read_node(&tx, &id)? {
+                known.insert(id, n);
+            }
+        }
+        let duplicate = match &op {
+            Op::Link { from, to, kind } => edge_exists(&tx, from, to, *kind)?,
+            _ => false,
+        };
+
         let entry = self.signer.append(tip.as_ref(), now_ms(), op);
-        let id = Node::target(&entry);
-        let current = read_node(&tx, &id)?;
-        let node = Node::apply(current, &entry).map_err(|_| Error::UnknownNode(id))?;
+        let change =
+            Change::of(&entry, |id| known.get(id).cloned(), |_, _, _| duplicate).map_err(|e| {
+                match e {
+                    ApplyError::UnknownNode(id) => Error::UnknownNode(id),
+                    ApplyError::SelfLink => {
+                        Error::Invalid("Ein Knoten kann nicht mit sich selbst verbunden werden")
+                    }
+                    ApplyError::DuplicateEdge => Error::Invalid("Diese Verbindung gibt es schon"),
+                }
+            })?;
 
         tx.execute(
             "INSERT INTO ledger (author, seq, hash, entry) VALUES (?1, ?2, ?3, ?4)",
@@ -155,22 +205,60 @@ impl Store {
                 postcard::to_allocvec(&entry)?
             ],
         )?;
-        tx.execute(
-            "INSERT INTO nodes (id, kind, updated_ms, node) VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT (id) DO UPDATE SET updated_ms = excluded.updated_ms, node = excluded.node",
-            params![
-                id.0.as_slice(),
-                node.kind.as_str(),
-                node.updated_ms as i64,
-                postcard::to_allocvec(&node)?
-            ],
-        )?;
+        match &change {
+            Change::Node(node) => tx.execute(
+                "INSERT INTO nodes (id, kind, updated_ms, node) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT (id) DO UPDATE SET updated_ms = excluded.updated_ms, node = excluded.node",
+                params![
+                    node.id.0.as_slice(),
+                    node.kind.as_str(),
+                    node.updated_ms as i64,
+                    postcard::to_allocvec(node)?
+                ],
+            )?,
+            Change::Edge(edge) => tx.execute(
+                "INSERT INTO edges (id, from_id, to_id, kind, created_ms, edge)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    edge.id.0.as_slice(),
+                    edge.from.0.as_slice(),
+                    edge.to.0.as_slice(),
+                    edge.kind.as_str(),
+                    edge.created_ms as i64,
+                    postcard::to_allocvec(edge)?
+                ],
+            )?,
+        };
         tx.commit()?;
-        Ok(node)
+        Ok(change)
     }
 
     pub fn node(&self, id: NodeId) -> Result<Option<Node>> {
         read_node(&self.conn, &id)
+    }
+
+    /// All connections, oldest first.
+    pub fn edges(&self) -> Result<Vec<Edge>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT edge FROM edges ORDER BY created_ms")?;
+        let rows = stmt.query_map([], |r| r.get::<_, Vec<u8>>(0))?;
+        rows.map(|b| Ok(postcard::from_bytes(&b?)?)).collect()
+    }
+
+    /// The ledger entries that shaped a node, oldest first — every version is still there.
+    pub fn history(&self, id: NodeId) -> Result<Vec<LedgerEntry>> {
+        let node = self.node(id)?.ok_or(Error::UnknownNode(id))?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT entry FROM ledger WHERE hash = ?1")?;
+        node.history
+            .iter()
+            .map(|h| {
+                let bytes: Vec<u8> = stmt.query_row([h.0.as_slice()], |r| r.get(0))?;
+                Ok(postcard::from_bytes(&bytes)?)
+            })
+            .collect()
     }
 
     /// Newest first, optionally filtered by kind.
@@ -206,6 +294,17 @@ fn read_node(conn: &Connection, id: &NodeId) -> Result<Option<Node>> {
     .map(|b| postcard::from_bytes(&b))
     .transpose()
     .map_err(Error::from)
+}
+
+fn edge_exists(conn: &Connection, from: &NodeId, to: &NodeId, kind: EdgeKind) -> Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM edges WHERE from_id = ?1 AND to_id = ?2 AND kind = ?3",
+            params![from.0.as_slice(), to.0.as_slice(), kind.as_str()],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
 }
 
 #[cfg(test)]
@@ -281,6 +380,40 @@ mod tests {
         let r = s.verify().unwrap();
         assert!(!r.ok);
         assert!(r.error.unwrap().contains("Eintrag 0"));
+    }
+
+    #[test]
+    fn link_and_history() {
+        let mut s = store();
+        let goal = s.create_node(NodeKind::Goal, "Laufen", "").unwrap();
+        let ev = s.create_node(NodeKind::Evidence, "5 km", "").unwrap();
+        s.update_node(goal.id, "Laufen 3x/Woche", "").unwrap();
+
+        let e = s.link(ev.id, goal.id, EdgeKind::Supports).unwrap();
+        assert_eq!((e.from, e.to), (ev.id, goal.id));
+        assert_eq!(s.edges().unwrap(), vec![e]);
+
+        assert!(matches!(
+            s.link(ev.id, goal.id, EdgeKind::Supports),
+            Err(Error::Invalid(_))
+        ));
+        assert!(matches!(
+            s.link(goal.id, goal.id, EdgeKind::RelatesTo),
+            Err(Error::Invalid(_))
+        ));
+        assert!(matches!(
+            s.link(goal.id, NodeId([7; 16]), EdgeKind::RelatesTo),
+            Err(Error::UnknownNode(_))
+        ));
+
+        let h = s.history(goal.id).unwrap();
+        assert_eq!(h.len(), 2);
+        assert!(matches!(&h[0].op, Op::CreateNode { title, .. } if title == "Laufen"));
+        assert!(matches!(&h[1].op, Op::UpdateNode { title, .. } if title == "Laufen 3x/Woche"));
+
+        let r = s.verify().unwrap();
+        assert!(r.ok, "{r:?}");
+        assert_eq!(r.entries, 4, "rejected links must not touch the ledger");
     }
 
     #[test]

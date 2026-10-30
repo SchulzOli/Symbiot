@@ -107,3 +107,38 @@ async fn bad_input_is_rejected() {
     let (s, _) = call(&app, "PUT", &unknown, Some(json!({"title": "x"}))).await;
     assert_eq!(s, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn link_nodes_and_read_history() {
+    let app = app();
+    let node = |kind: &str, title: &str| json!({"kind": kind, "title": title});
+    let (_, goal) = call(&app, "POST", "/api/nodes", Some(node("goal", "Laufen"))).await;
+    let (_, ev) = call(&app, "POST", "/api/nodes", Some(node("evidence", "5 km"))).await;
+    let (goal, ev) = (goal["id"].as_str().unwrap(), ev["id"].as_str().unwrap());
+
+    let link = json!({"from": ev, "to": goal, "kind": "supports"});
+    let (s, edge) = call(&app, "POST", "/api/edges", Some(link.clone())).await;
+    assert_eq!(s, StatusCode::CREATED);
+    assert_eq!(edge["from"], ev);
+    assert_eq!(edge["kind"], "supports");
+
+    let (s, err) = call(&app, "POST", "/api/edges", Some(link)).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert!(err["error"].as_str().unwrap().contains("schon"));
+
+    let (_, edges) = call(&app, "GET", "/api/edges", None).await;
+    assert_eq!(edges.as_array().unwrap().len(), 1);
+
+    call(
+        &app,
+        "PUT",
+        &format!("/api/nodes/{goal}"),
+        Some(json!({"title": "Laufen 3x"})),
+    )
+    .await;
+    let (s, history) = call(&app, "GET", &format!("/api/nodes/{goal}/history"), None).await;
+    assert_eq!(s, StatusCode::OK);
+    let history = history.as_array().unwrap();
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[1]["op"]["update_node"]["title"], "Laufen 3x");
+}

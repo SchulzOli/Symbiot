@@ -7,7 +7,8 @@ use core::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::bytes::{Hash, NodeId, PubKey};
+use crate::bytes::{EdgeId, Hash, NodeId, PubKey};
+use crate::edge::{Edge, EdgeKind};
 use crate::ledger::{LedgerEntry, Op};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -76,22 +77,41 @@ pub struct Node {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ApplyError {
     UnknownNode(NodeId),
+    SelfLink,
+    DuplicateEdge,
 }
 
 impl fmt::Display for ApplyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ApplyError::UnknownNode(id) => write!(f, "Knoten {id} existiert nicht"),
+            ApplyError::SelfLink => {
+                f.write_str("Ein Knoten kann nicht mit sich selbst verbunden werden")
+            }
+            ApplyError::DuplicateEdge => f.write_str("Diese Verbindung gibt es schon"),
         }
     }
 }
 
-impl Node {
-    /// Applies one entry: creates the node or advances it to the next version.
-    /// `current` must be the node the entry refers to (`None` for a create).
-    pub fn apply(current: Option<Node>, e: &LedgerEntry) -> Result<Node, ApplyError> {
-        match (&e.op, current) {
-            (Op::CreateNode { kind, title, body }, _) => Ok(Node {
+/// What one ledger entry does to the projection.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Change {
+    /// A new node, or the next version of an existing one.
+    Node(Node),
+    Edge(Edge),
+}
+
+impl Change {
+    /// Derives the effect of `e`. `node` looks up the current version of a node,
+    /// `has_edge` tells whether the same connection already exists. Shared by
+    /// [`State`] and the SQLite store, so every platform applies the same rules.
+    pub fn of(
+        e: &LedgerEntry,
+        node: impl Fn(&NodeId) -> Option<Node>,
+        has_edge: impl Fn(&NodeId, &NodeId, EdgeKind) -> bool,
+    ) -> Result<Change, ApplyError> {
+        match &e.op {
+            Op::CreateNode { kind, title, body } => Ok(Change::Node(Node {
                 id: NodeId::from_entry_hash(&e.hash),
                 kind: *kind,
                 title: title.clone(),
@@ -101,40 +121,74 @@ impl Node {
                 created_ms: e.ts_ms,
                 updated_ms: e.ts_ms,
                 history: alloc::vec![e.hash],
-            }),
-            (Op::UpdateNode { title, body, .. }, Some(mut n)) => {
+            })),
+            Op::UpdateNode {
+                node: id,
+                title,
+                body,
+            } => {
+                let mut n = node(id).ok_or(ApplyError::UnknownNode(*id))?;
                 n.title = title.clone();
                 n.body = body.clone();
                 n.version += 1;
                 n.updated_ms = e.ts_ms;
                 n.history.push(e.hash);
-                Ok(n)
+                Ok(Change::Node(n))
             }
-            (Op::UpdateNode { node, .. }, None) => Err(ApplyError::UnknownNode(*node)),
-        }
-    }
-
-    /// The node an entry refers to, if it already exists.
-    pub fn target(e: &LedgerEntry) -> NodeId {
-        match &e.op {
-            Op::CreateNode { .. } => NodeId::from_entry_hash(&e.hash),
-            Op::UpdateNode { node, .. } => *node,
+            Op::Link { from, to, kind } => {
+                if from == to {
+                    return Err(ApplyError::SelfLink);
+                }
+                for id in [from, to] {
+                    if node(id).is_none() {
+                        return Err(ApplyError::UnknownNode(*id));
+                    }
+                }
+                if has_edge(from, to, *kind) {
+                    return Err(ApplyError::DuplicateEdge);
+                }
+                Ok(Change::Edge(Edge {
+                    id: EdgeId::from_entry_hash(&e.hash),
+                    from: *from,
+                    to: *to,
+                    kind: *kind,
+                    author: e.author,
+                    created_ms: e.ts_ms,
+                    entry: e.hash,
+                }))
+            }
         }
     }
 }
 
-/// In-memory projection of verified entries — used by the UI, tests and small devices.
+/// In-memory projection of verified entries — used by tests and small devices.
 /// Apps with storage keep the same projection in SQLite.
 #[derive(Clone, Debug, Default)]
 pub struct State {
     pub nodes: BTreeMap<NodeId, Node>,
+    pub edges: BTreeMap<EdgeId, Edge>,
 }
 
 impl State {
-    pub fn apply(&mut self, e: &LedgerEntry) -> Result<&Node, ApplyError> {
-        let id = Node::target(e);
-        let next = Node::apply(self.nodes.remove(&id), e)?;
-        Ok(self.nodes.entry(id).or_insert(next))
+    pub fn apply(&mut self, e: &LedgerEntry) -> Result<Change, ApplyError> {
+        let change = Change::of(
+            e,
+            |id| self.nodes.get(id).cloned(),
+            |from, to, kind| {
+                self.edges
+                    .values()
+                    .any(|x| x.from == *from && x.to == *to && x.kind == kind)
+            },
+        )?;
+        match &change {
+            Change::Node(n) => {
+                self.nodes.insert(n.id, n.clone());
+            }
+            Change::Edge(x) => {
+                self.edges.insert(x.id, x.clone());
+            }
+        }
+        Ok(change)
     }
 }
 
@@ -155,7 +209,7 @@ mod tests {
                 body: String::new(),
             },
         );
-        let id = Node::target(&c);
+        let id = NodeId::from_entry_hash(&c.hash);
         let u = s.append(
             Some(&c),
             20,
@@ -168,7 +222,8 @@ mod tests {
 
         let mut st = State::default();
         st.apply(&c).unwrap();
-        let n = st.apply(&u).unwrap();
+        st.apply(&u).unwrap();
+        let n = &st.nodes[&id];
         assert_eq!(n.version, 2);
         assert_eq!(n.title, "Laufen, 3x pro Woche");
         assert_eq!(n.history, alloc::vec![c.hash, u.hash]);
@@ -195,5 +250,50 @@ mod tests {
         for k in NodeKind::ALL {
             assert_eq!(NodeKind::parse(k.as_str()), Some(k));
         }
+        for k in EdgeKind::ALL {
+            assert_eq!(EdgeKind::parse(k.as_str()), Some(k));
+        }
+    }
+
+    #[test]
+    fn link_rules() {
+        let s = Signer::from_seed([2; 32]);
+        let mut st = State::default();
+        let mut chain: Vec<LedgerEntry> = Vec::new();
+        let mut push = |st: &mut State, op: Op| {
+            let e = s.append(chain.last(), chain.len() as u64, op);
+            chain.push(e.clone());
+            st.apply(&e)
+        };
+        let create = |title: &str| Op::CreateNode {
+            kind: NodeKind::Goal,
+            title: title.into(),
+            body: String::new(),
+        };
+        let a = match push(&mut st, create("Ziel")).unwrap() {
+            Change::Node(n) => n.id,
+            _ => unreachable!(),
+        };
+        let b = match push(&mut st, create("Beleg")).unwrap() {
+            Change::Node(n) => n.id,
+            _ => unreachable!(),
+        };
+        let link = |from, to| Op::Link {
+            from,
+            to,
+            kind: EdgeKind::Supports,
+        };
+
+        assert!(matches!(push(&mut st, link(b, a)), Ok(Change::Edge(_))));
+        assert_eq!(push(&mut st, link(b, a)), Err(ApplyError::DuplicateEdge));
+        assert_eq!(push(&mut st, link(a, a)), Err(ApplyError::SelfLink));
+        let ghost = NodeId([9; 16]);
+        assert_eq!(
+            push(&mut st, link(a, ghost)),
+            Err(ApplyError::UnknownNode(ghost))
+        );
+        // The reverse direction is a different connection.
+        assert!(push(&mut st, link(a, b)).is_ok());
+        assert_eq!(st.edges.len(), 2);
     }
 }

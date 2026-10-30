@@ -48,7 +48,13 @@ cd apps/desktop && cargo tauri dev
 
 ## Status
 - **M0 Fundament:** fertig
-- **M1 Walking Skeleton:** in Arbeit
+- **M1 Walking Skeleton:** fertig (v0.1.0, läuft auf heimserver; Alarme bewusst weggelassen)
+- **M2 Verknüpfen:** Kanten, Graph, Bearbeiten mit Verlauf, E2E-Test
+
+End-to-End-Test lokal (braucht `trunk build --release` in `apps/ui`):
+```bash
+cd e2e && npm ci && npx playwright install chromium && npx playwright test
+```
 
 ## Lizenz
 MIT

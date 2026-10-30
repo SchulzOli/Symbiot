@@ -13,10 +13,13 @@ use sha2::{Digest, Sha256};
 
 use crate::PROTOCOL_VERSION;
 use crate::bytes::{Hash, NodeId, PubKey, Sig};
+use crate::edge::EdgeKind;
 use crate::node::NodeKind;
 
 /// What an entry does. Editing never overwrites — it appends an `UpdateNode`.
 /// Externally tagged (serde default): postcard cannot read internally tagged enums.
+/// postcard encodes the variant index, so new variants go at the END — reordering
+/// would change the hashes of existing chains.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Op {
@@ -29,6 +32,11 @@ pub enum Op {
         node: NodeId,
         title: String,
         body: String,
+    },
+    Link {
+        from: NodeId,
+        to: NodeId,
+        kind: EdgeKind,
     },
 }
 
@@ -249,6 +257,30 @@ mod tests {
         assert_eq!(e.seq, 0);
         assert_eq!(e.prev, Hash::ZERO);
         assert_eq!(e.content_hash().unwrap(), e.hash);
+        assert_eq!(
+            e.hash.to_hex(),
+            "77cf04ae9349400104de686c71cbdb4978e811c4466b494b3a5de33600d55dbc"
+        );
+    }
+
+    #[test]
+    fn link_round_trips_and_verifies() {
+        let s = signer();
+        let a = s.append(None, 1, create("Ziel"));
+        let b = s.append(Some(&a), 2, create("Beleg"));
+        let l = s.append(
+            Some(&b),
+            3,
+            Op::Link {
+                from: NodeId::from_entry_hash(&b.hash),
+                to: NodeId::from_entry_hash(&a.hash),
+                kind: EdgeKind::Supports,
+            },
+        );
+        let chain = alloc::vec![a, b, l];
+        let back: Vec<LedgerEntry> =
+            postcard::from_bytes(&postcard::to_allocvec(&chain).unwrap()).unwrap();
+        assert_eq!(verify_chain(&back), Ok(3));
     }
 
     #[test]
