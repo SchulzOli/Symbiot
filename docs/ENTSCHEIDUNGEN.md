@@ -17,12 +17,12 @@ Wir geben nur Empfehlungen. Daraus folgt für die Architektur:
 - Die Empfehlung ist Teil der Einrichtung und ist veränderbar, z. B. „Kette auf dem Gerät, Kopie auf dem
   eigenen Server, KI lokal; Claude nur über den Masken-Filter“.
 
-## E2 — Löschen: Löschmarker · *entschieden* · Ergänzung als *Vorschlag*
+## E2 — Löschen: Löschmarker + Inhalts-Hash · *entschieden*
 
 Löschen heißt: ein neuer, signierter Eintrag `DeleteNode` bzw. `Unlink` (Löschmarker). Die Kette bleibt
 lückenlos prüfbar, die Projektion zeigt den Knoten bzw. die Kante nicht mehr.
 
-**Vorschlag zur Ergänzung:** Ein Löschmarker allein entfernt den Inhalt nicht – Titel und Text stehen weiter
+**Ergänzung (entschieden):** Ein Löschmarker allein entfernt den Inhalt nicht – Titel und Text stehen weiter
 im früheren Eintrag. Damit „löschbar“ wirklich löscht, schlagen wir vor, das Kettenformat **vor M4** so zu
 ändern, dass die Signatur nicht über den Inhalt selbst läuft, sondern über dessen Hash:
 
@@ -52,7 +52,9 @@ eigenen Eintrag (`SetPolicy { node, deletable, exportable }`), den die Projektio
 | exportierbar | erscheint in Export und Sync zu Geräten anderer Menschen |
 | nicht exportierbar | bleibt auf den eigenen Geräten, verlässt sie nie (auch nicht zur gehosteten KI) |
 
-Offen: Darf eine Richtlinie später gelockert werden (nicht löschbar → löschbar)? Verschärfen sollte immer gehen.
+**Entschieden:** Eine Richtlinie darf später verschärft und auch gelockert werden (nicht löschbar → löschbar).
+Jede Änderung ist ein neuer signierter `SetPolicy`-Eintrag, im Verlauf sichtbar. „Nicht löschbar“ bedeutet
+damit: nicht löschbar, solange der Mensch es nicht ändert.
 
 ## E4 — Was ist sensibel? · *entschieden*
 
@@ -82,7 +84,10 @@ Ansatz. Wichtig: Der **Geräteschlüssel wird dabei nicht mit umgezogen.**
 |---|---|
 | alle Ketten, damit alle Knoten, Kanten, Verläufe, Richtlinien und Regeln | der alte Geräteschlüssel |
 | Gerätebestätigungen und Widerrufe | Inhalte, die nach E2 weggeräumt wurden |
-| | Knoten, die „nicht exportierbar“ sind, wenn das Backup ein anderes Gerät verlässt – **offen:** zählt das eigene Backup als Export? |
+| | Knoten, die „nicht exportierbar“ sind (**entschieden:** auch das eigene Backup zählt als Export) |
+
+**Folge, die die Oberfläche klar sagen muss:** „Nicht exportierbar“ heißt, der Knoten lebt nur auf diesem
+einen Gerät. Geht das Gerät verloren, ist er weg. Beim Setzen des Schalters erscheint dieser Hinweis.
 
 ## E6 — Verschlüsselung des Speichers · *Vorschlag*
 
@@ -110,6 +115,16 @@ Fremde Adapter laufen als WebAssembly-Komponenten (wasmtime) mit vorab erklärte
 nicht der Adapter. Der Mensch erteilt und widerruft Zugriffe als Einträge in seiner Kette. Adapter beobachten
 nur; was daraus eigene Knoten oder Handlungen werden, bleibt ein Vorschlag. Zuerst: Kalender, Home Assistant,
 Matrix lesend, dazu ein MCP-Server von Symbiot (nur lesen und vorschlagen).
+
+## E10 — Belege von Adaptern werden Knoten · *entschieden*
+
+- **Standard:** Jeder Beleg eines Adapters wird erst durch einen Klick des Menschen zu einem Knoten.
+- **„Diesem Adapter vertrauen“:** Der Mensch kann einen Adapter als vertraut markieren. Dann werden seine
+  Belege ohne Klick zu Knoten. Das ist ein Teil der Freigabe (`Grant`) in der Kette, jederzeit widerrufbar,
+  und jeder so entstandene Knoten zeigt, dass er über das Vertrauen entstanden ist.
+- **Vorschlag zur Abgrenzung:** Vertrauen gilt nur für das Anlegen von Knoten. Handlungen nach außen (Mail
+  senden, Licht schalten) bleiben immer ein Klick, und Belege, die eine Sensibilitäts-Regel (E4) treffen,
+  ebenso.
 
 ## E8 — Zurückgestellt · *entschieden*
 
