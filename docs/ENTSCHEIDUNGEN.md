@@ -145,10 +145,22 @@ beim ersten Adapter (Kalender) geprüft. Eigene Repos und Forks legt erst an, we
 - Auch bei vertrautem Text gilt weiter: Die KI schlägt nur vor, der Mensch entscheidet. Vertrauen öffnet also
   den Weg zur KI, nicht den Weg zu Handlungen.
 
-## E13 — Regeln fürs Bündeln · *offen, Recherche läuft*
+## E13 — Regeln fürs Bündeln · *Vorschlag, Recherche liegt vor*
 
 Sensoren und Adapter erzeugen viele Einträge. Gesucht sind Regeln für Bündeln, Aufbewahren und Checkpoints,
-die die Prüfbarkeit erhalten. Recherche: `docs/RECHERCHE-BUENDELN.md`.
+die die Prüfbarkeit erhalten. Recherche: [RECHERCHE-BUENDELN.md](RECHERCHE-BUENDELN.md).
+
+Kern des Vorschlags:
+- **Gebündelt wird nur bei Maschinen**, nie bei Geräten von Menschen. Adapter schließen ein Bündel nach 60 s,
+  256 Einträgen oder 16 KiB; Sensoren schreiben einen Eintrag pro 5 Minuten, Teil 0 ist eine Zusammenfassung.
+- **Drei Aufbewahrungsklassen:** roh · Zusammenfassung · nur Nachweis. Der Mensch legt sie pro Adapter fest
+  (`SetRetention`), das Manifest schlägt einen Standard vor.
+- **Checkpoints** alle 1024 Einträge oder 24 h: schnelles Prüfen und schneller Start neuer Geräte.
+- **Nie weggeräumt:** Köpfe, Hashes, Signaturen, Löschmarker, Richtlinien, Freigaben, Entscheidungen,
+  Checkpoints. Aufräumen geschieht nie still.
+- **Folge fürs Kettenformat (vor M4):** Kopf und Inhalt trennen, Merkle-Wurzel über die Inhaltsteile mit Salz,
+  Protokollversion 2, feste Typ-IDs. Weil Knoten-IDs aus dem Eintrags-Hash entstehen, ändert eine Migration
+  bestehender Ketten alle Knoten-IDs.
 
 ## E8 — Zurückgestellt · *entschieden*
 
