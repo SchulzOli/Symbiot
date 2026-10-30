@@ -21,5 +21,3 @@ mod tests {
         assert_eq!(PROTOCOL_VERSION, 1);
     }
 }
-
-pub const   CI_RED_TEST:u8=1;
