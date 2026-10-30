@@ -3,7 +3,7 @@
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use symbiot_core::{Node, NodeKind, VerifyReport};
+use symbiot_core::{Edge, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, VerifyReport};
 use wasm_bindgen::{JsCast, JsValue};
 
 pub type ApiResult<T> = Result<T, String>;
@@ -35,6 +35,56 @@ pub async fn create_node(kind: NodeKind, title: String, body: String) -> ApiResu
         return invoke("create_node", &args).await;
     }
     http_json(gloo_net::http::Request::post("/api/nodes").json(&args)).await
+}
+
+pub async fn update_node(id: NodeId, title: String, body: String) -> ApiResult<Node> {
+    #[derive(Serialize)]
+    struct Args {
+        id: NodeId,
+        title: String,
+        body: String,
+    }
+    let args = Args { id, title, body };
+    if tauri_invoke_fn().is_some() {
+        return invoke("update_node", &args).await;
+    }
+    let url = format!("/api/nodes/{id}");
+    http_json(gloo_net::http::Request::put(&url).json(&args)).await
+}
+
+pub async fn node_history(id: NodeId) -> ApiResult<Vec<LedgerEntry>> {
+    #[derive(Serialize)]
+    struct Args {
+        id: NodeId,
+    }
+    if tauri_invoke_fn().is_some() {
+        return invoke("node_history", &Args { id }).await;
+    }
+    let url = format!("/api/nodes/{id}/history");
+    http_json(gloo_net::http::Request::get(&url).build()).await
+}
+
+pub async fn list_edges() -> ApiResult<Vec<Edge>> {
+    #[derive(Serialize)]
+    struct NoArgs {}
+    if tauri_invoke_fn().is_some() {
+        return invoke("list_edges", &NoArgs {}).await;
+    }
+    http_json(gloo_net::http::Request::get("/api/edges").build()).await
+}
+
+pub async fn link(from: NodeId, to: NodeId, kind: EdgeKind) -> ApiResult<Edge> {
+    #[derive(Serialize)]
+    struct Args {
+        from: NodeId,
+        to: NodeId,
+        kind: EdgeKind,
+    }
+    let args = Args { from, to, kind };
+    if tauri_invoke_fn().is_some() {
+        return invoke("link_nodes", &args).await;
+    }
+    http_json(gloo_net::http::Request::post("/api/edges").json(&args)).await
 }
 
 pub async fn verify() -> ApiResult<VerifyReport> {

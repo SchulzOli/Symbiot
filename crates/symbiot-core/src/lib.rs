@@ -8,12 +8,14 @@
 extern crate alloc;
 
 mod bytes;
+mod edge;
 mod ledger;
 mod node;
 
-pub use bytes::{Hash, NodeId, PubKey, Sig};
+pub use bytes::{EdgeId, Hash, NodeId, PubKey, Sig};
+pub use edge::{Edge, EdgeKind};
 pub use ledger::{LedgerEntry, Op, Signer, VerifyError, VerifyReport, build_chain, verify_chain};
-pub use node::{ApplyError, Node, NodeKind, State};
+pub use node::{ApplyError, Change, Node, NodeKind, State};
 
 /// Version of the ledger/sync wire format. Bumped on any breaking change,
 /// because hashes must be identical on every platform.

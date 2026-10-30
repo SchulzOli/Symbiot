@@ -10,7 +10,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
-use symbiot_core::{LedgerEntry, Node, NodeId, NodeKind};
+use symbiot_core::{Edge, EdgeKind, LedgerEntry, Node, NodeId, NodeKind};
 use symbiot_store::{Store, VerifyReport};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
@@ -31,6 +31,8 @@ pub fn app(store: Store, ui_dir: Option<PathBuf>) -> Router {
     let api = Router::new()
         .route("/nodes", get(list_nodes).post(create_node))
         .route("/nodes/{id}", get(get_node).put(update_node))
+        .route("/nodes/{id}/history", get(history))
+        .route("/edges", get(list_edges).post(create_edge))
         .route("/ledger", get(ledger))
         .route("/ledger/verify", get(verify));
 
@@ -115,6 +117,33 @@ async fn update_node(
     let node = lock(&s).update_node(parse_id(&id)?, &e.title, &e.body)?;
     tracing::info!(id = %node.id, version = node.version, "node updated");
     Ok(Json(node))
+}
+
+async fn history(
+    State(s): State<Shared>,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<LedgerEntry>>, ApiError> {
+    Ok(Json(lock(&s).history(parse_id(&id)?)?))
+}
+
+#[derive(Deserialize)]
+pub struct NewEdge {
+    pub from: NodeId,
+    pub to: NodeId,
+    pub kind: EdgeKind,
+}
+
+async fn list_edges(State(s): State<Shared>) -> Result<Json<Vec<Edge>>, ApiError> {
+    Ok(Json(lock(&s).edges()?))
+}
+
+async fn create_edge(
+    State(s): State<Shared>,
+    Json(e): Json<NewEdge>,
+) -> Result<(StatusCode, Json<Edge>), ApiError> {
+    let edge = lock(&s).link(e.from, e.to, e.kind)?;
+    tracing::info!(id = %edge.id, kind = edge.kind.as_str(), "edge created");
+    Ok((StatusCode::CREATED, Json(edge)))
 }
 
 async fn ledger(State(s): State<Shared>) -> Result<Json<Vec<LedgerEntry>>, ApiError> {
