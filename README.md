@@ -16,8 +16,22 @@ Hervorgegangen aus dem Ideengarten *TrustInAI*. Benannt nach der *Symbiose Mensc
 - [docs/PLAN.md](docs/PLAN.md): Meilensteine M0–M6, Lifecycle, Checkpoints
 - [docs/FEATURES.md](docs/FEATURES.md): erste Features F1–F7 mit Abnahmekriterien
 
+## Entwickeln
+Voraussetzungen und Einrichtung: [docs/TECH-STACK.md](docs/TECH-STACK.md#entwicklungsumgebung-windows-pc).
+
+```bash
+cargo test --workspace
+```
+```bash
+cargo run -p symbiot-server
+```
+```bash
+cd apps/ui && trunk serve
+```
+Der Server antwortet unter `http://127.0.0.1:8100/health`, die UI unter `http://127.0.0.1:8080`.
+
 ## Status
-- **M0 Fundament:** geplant
+- **M0 Fundament:** in Arbeit
 
 ## Lizenz
 MIT
