@@ -1,0 +1,42 @@
+name: Release
+
+# Tag vX.Y.Z (matching the workspace version) → desktop installers in a GitHub Release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  desktop:
+    name: Desktop (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-latest, ubuntu-22.04, macos-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tauri system dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: npx --yes @tauri-apps/cli@2
+          tagName: ${{ github.ref_name }}
+          releaseName: Symbiot ${{ github.ref_name }}
+          releaseBody: Desktop-Installer für Windows, Linux und macOS (unsigniert).
+          releaseDraft: false
