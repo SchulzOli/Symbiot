@@ -33,7 +33,7 @@ jobs:
         run: cargo clippy -p symbiot-ui --target wasm32-unknown-unknown -- -D warnings
 
   ui-desktop:
-    name: UI (WASM) · Desktop (Tauri)
+    name: UI (WASM) · Desktop (Tauri) · E2E
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,6 +54,22 @@ jobs:
         run: trunk build --release
       - name: Clippy desktop
         run: cargo clippy -p symbiot-desktop --all-targets -- -D warnings
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - name: E2E (Playwright against the real server + UI)
+        working-directory: e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npx playwright test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: e2e/playwright-report
       - uses: actions/upload-artifact@v4
         with:
           name: ui-dist

@@ -1,10 +1,12 @@
 //! Symbiot UI — one Leptos app for desktop (Tauri), mobile and the web.
 
 mod api;
+mod detail;
+mod graph;
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use symbiot_core::{Node, NodeKind, VerifyReport};
+use symbiot_core::{Edge, Node, NodeId, NodeKind, VerifyReport};
 use wasm_bindgen::JsValue;
 
 fn main() {
@@ -12,14 +14,27 @@ fn main() {
     leptos::mount::mount_to_body(App);
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    List,
+    Graph,
+}
+
+async fn load() -> Result<(Vec<Node>, Vec<Edge>), String> {
+    Ok((api::list_nodes(None).await?, api::list_edges().await?))
+}
+
 #[component]
 fn App() -> impl IntoView {
     let filter = RwSignal::new(None::<NodeKind>);
-    // Bumped after every write so the list reloads.
+    let mode = RwSignal::new(Mode::List);
+    let selected = RwSignal::new(None::<NodeId>);
+    // Bumped after every write so everything reloads.
     let version = RwSignal::new(0u32);
-    let nodes = LocalResource::new(move || {
+    let saved = move || version.update(|v| *v += 1);
+    let data = LocalResource::new(move || {
         version.track();
-        api::list_nodes(filter.get())
+        load()
     });
 
     view! {
@@ -28,22 +43,38 @@ fn App() -> impl IntoView {
                 <h1>"Symbiot"</h1>
                 <p class="tagline">"Die KI schlägt vor, du entscheidest."</p>
             </header>
-            <Capture on_saved=move || version.update(|v| *v += 1) />
-            <Filter filter />
-            <section class="nodes">
-                {move || match nodes.get() {
-                    None => view! { <p class="muted">"Lade …"</p> }.into_any(),
-                    Some(Err(e)) => view! { <p class="error">{e}</p> }.into_any(),
-                    Some(Ok(list)) if list.is_empty() => {
-                        view! { <p class="muted">"Noch nichts festgehalten."</p> }.into_any()
-                    }
-                    Some(Ok(list)) => list
-                        .into_iter()
-                        .map(|n| view! { <NodeCard node=n /> })
-                        .collect_view()
-                        .into_any(),
-                }}
-            </section>
+            <Capture on_saved=saved />
+            <nav class="row between">
+                <Filter filter />
+                <div class="tabs">
+                    <button class="chip" class:active=move || mode.get() == Mode::List on:click=move |_| mode.set(Mode::List)>"Liste"</button>
+                    <button class="chip" class:active=move || mode.get() == Mode::Graph on:click=move |_| mode.set(Mode::Graph)>"Graph"</button>
+                </div>
+            </nav>
+            {move || match data.get() {
+                None => view! { <p class="muted">"Lade …"</p> }.into_any(),
+                Some(Err(e)) => view! { <p class="error">{e}</p> }.into_any(),
+                Some(Ok((nodes, edges))) => {
+                    let detail = selected.get().and_then(|id| nodes.iter().find(|n| n.id == id).cloned()).map(|node| {
+                        view! { <detail::Detail node nodes=nodes.clone() edges=edges.clone() selected on_saved=saved refresh=version /> }
+                    });
+                    let shown: Vec<Node> = nodes
+                        .iter()
+                        .filter(|n| filter.get().is_none_or(|k| n.kind == k))
+                        .cloned()
+                        .collect();
+                    let body = match mode.get() {
+                        Mode::Graph => view! { <graph::Graph nodes=shown edges selected /> }.into_any(),
+                        Mode::List if shown.is_empty() => view! { <p class="muted">"Noch nichts festgehalten."</p> }.into_any(),
+                        Mode::List => view! {
+                            <section class="nodes">
+                                {shown.into_iter().map(|n| view! { <NodeCard node=n selected /> }).collect_view()}
+                            </section>
+                        }.into_any(),
+                    };
+                    view! { {detail} {body} }.into_any()
+                }
+            }}
             <Verify refresh=version />
             <footer>
                 {format!(
@@ -140,7 +171,8 @@ fn Filter(filter: RwSignal<Option<NodeKind>>) -> impl IntoView {
 }
 
 #[component]
-fn NodeCard(node: Node) -> impl IntoView {
+fn NodeCard(node: Node, selected: RwSignal<Option<NodeId>>) -> impl IntoView {
+    let id = node.id;
     let changed = format_ms(node.updated_ms);
     let meta = if node.version > 1 {
         format!(
@@ -153,7 +185,12 @@ fn NodeCard(node: Node) -> impl IntoView {
         format!("{} · {}", short(&node.id.to_hex()), changed)
     };
     view! {
-        <article class="node">
+        <article
+            class="node"
+            class:selected=move || selected.get() == Some(id)
+            data-testid="node-card"
+            on:click=move |_| selected.set(Some(id))
+        >
             <span class=format!("kind kind-{}", node.kind.as_str())>{node.kind.label()}</span>
             <h3>{node.title}</h3>
             {(!node.body.is_empty()).then(|| view! { <p>{node.body.clone()}</p> })}
@@ -196,11 +233,11 @@ fn Verify(refresh: RwSignal<u32>) -> impl IntoView {
     }
 }
 
-fn short(hex: &str) -> String {
+pub(crate) fn short(hex: &str) -> String {
     hex.chars().take(8).collect()
 }
 
-fn format_ms(ms: u64) -> String {
+pub(crate) fn format_ms(ms: u64) -> String {
     let d = js_sys::Date::new(&JsValue::from_f64(ms as f64));
     String::from(d.to_locale_string("de-DE", &JsValue::UNDEFINED))
 }

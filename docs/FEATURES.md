@@ -17,9 +17,12 @@ Nichts wird heimlich verändert.
 
 ## F3 — Verknüpfen *(M2)*
 Zusammenhänge sichtbar machen.
-- Kanten: `stützt`, `widerspricht`, `bezieht sich auf`, `abgeleitet von`.
+- Kanten: `stützt`, `widerspricht`, `bezieht sich auf`, `abgeleitet von`. Jede Kante ist ein signierter Eintrag (`Op::Link`).
+  Abgelehnt werden Verbindungen mit sich selbst, zu unbekannten Knoten und doppelte Verbindungen.
 - Graph-Ansicht (SVG in Leptos), Klick auf Knoten zeigt seine Herkunft im Ledger.
+- Detailansicht: bearbeiten (neue Version), Verbindungen ansehen und anlegen, Verlauf aller Versionen aus dem Ledger.
 - **Fertig, wenn:** Ein E2E-Test legt Ziel und Beleg an, verbindet sie und findet die Kante in der Ansicht.
+  ✅ `e2e/tests/verknuepfen.spec.ts`, läuft in der CI.
 
 ## F4 — Mitdenken *(M3)*
 Die KI schlägt den nächsten Schritt vor, ich entscheide.
