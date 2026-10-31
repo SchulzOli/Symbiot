@@ -11,8 +11,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use symbiot_core::{
-    ApplyError, Change, Edge, EdgeKind, Hash, LedgerEntry, Node, NodeId, NodeKind, Op, Proposal,
-    PubKey, Sig, Signer,
+    ApplyError, Change, Edge, EdgeId, EdgeKind, Hash, LedgerEntry, Lookup, Node, NodeId, NodeKind,
+    Op, Policy, Proposal, PubKey, Sig, Signer,
 };
 
 /// `PRAGMA user_version` of the current schema. 0 with an `entry` column is the v1 format.
@@ -30,6 +30,8 @@ pub enum Error {
     Invalid(&'static str),
     #[error("Knoten {0} existiert nicht")]
     UnknownNode(NodeId),
+    #[error("Verbindung {0} existiert nicht")]
+    UnknownEdge(EdgeId),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -145,6 +147,11 @@ impl Store {
              );
              CREATE TABLE IF NOT EXISTS sensitive (
                  node_id BLOB PRIMARY KEY
+             );
+             CREATE TABLE IF NOT EXISTS policies (
+                 node_id    BLOB PRIMARY KEY,
+                 deletable  INTEGER NOT NULL,
+                 exportable INTEGER NOT NULL
              );",
         )?;
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -161,18 +168,41 @@ impl Store {
     }
 
     pub fn create_node(&mut self, kind: NodeKind, title: &str, body: &str) -> Result<Node> {
+        self.create_node_with(kind, title, body, Policy::default())
+    }
+
+    /// Creates a node with its policy (E3). A policy other than the default is written in the
+    /// same transaction, so the node never exists without it — not even for a moment.
+    pub fn create_node_with(
+        &mut self,
+        kind: NodeKind,
+        title: &str,
+        body: &str,
+        policy: Policy,
+    ) -> Result<Node> {
         let title = title.trim();
         if title.is_empty() {
             return Err(Error::Invalid("Titel darf nicht leer sein"));
         }
-        match self.append(Op::CreateNode {
+        let tx = self.conn.transaction()?;
+        let create = Op::CreateNode {
             kind,
             title: title.into(),
             body: body.into(),
-        })? {
-            Change::Node(n) => Ok(n),
-            _ => unreachable!("CreateNode yields a node"),
+        };
+        let Change::Node(node) = append_in(&tx, &self.signer, create)? else {
+            unreachable!("CreateNode yields a node")
+        };
+        if policy != Policy::default() {
+            let set = Op::SetPolicy {
+                node: node.id,
+                deletable: policy.deletable,
+                exportable: policy.exportable,
+            };
+            append_in(&tx, &self.signer, set)?;
         }
+        tx.commit()?;
+        Ok(node)
     }
 
     /// Editing appends a new entry; earlier versions stay in the ledger.
@@ -197,6 +227,43 @@ impl Store {
             Change::Edge(e) => Ok(e),
             _ => unreachable!("Link yields an edge"),
         }
+    }
+
+    /// Removes a connection.
+    pub fn unlink(&mut self, edge: EdgeId) -> Result<()> {
+        self.append(Op::Unlink { edge }).map(|_| ())
+    }
+
+    /// E2: writes a deletion marker. If the node is deletable, the content of every entry
+    /// that shaped it is removed here and now. Returns how many entries lost their content.
+    pub fn delete_node(&mut self, id: NodeId) -> Result<usize> {
+        match self.append(Op::DeleteNode { node: id })? {
+            Change::Deleted { prune, .. } => Ok(prune.len()),
+            _ => unreachable!("DeleteNode yields a deletion"),
+        }
+    }
+
+    /// E3: sets whether a node is deletable and exportable. Every change is a new entry.
+    pub fn set_policy(&mut self, id: NodeId, policy: Policy) -> Result<()> {
+        self.append(Op::SetPolicy {
+            node: id,
+            deletable: policy.deletable,
+            exportable: policy.exportable,
+        })
+        .map(|_| ())
+    }
+
+    pub fn policy(&self, id: NodeId) -> Result<Policy> {
+        self.node(id)?.ok_or(Error::UnknownNode(id))?;
+        read_policy(&self.conn, &id)
+    }
+
+    /// Nodes that must stay on the own devices (E3) — also away from a hosted AI.
+    pub fn not_exportable_nodes(&self) -> Result<Vec<NodeId>> {
+        node_ids(
+            &self.conn,
+            "SELECT node_id FROM policies WHERE exportable = 0",
+        )
     }
 
     /// F4: the human accepted an AI proposal. Signs the decision with the full proposal and
@@ -224,115 +291,199 @@ impl Store {
 
     /// All nodes currently marked as sensitive.
     pub fn sensitive_nodes(&self) -> Result<Vec<NodeId>> {
-        let mut stmt = self.conn.prepare("SELECT node_id FROM sensitive")?;
-        let rows = stmt.query_map([], |r| r.get::<_, Vec<u8>>(0))?;
-        rows.map(|b| {
-            let b = b?;
-            let bytes: [u8; 16] = b
-                .try_into()
-                .map_err(|_| Error::Invalid("ungültige Knoten-ID in der Datenbank"))?;
-            Ok(NodeId(bytes))
-        })
-        .collect()
+        node_ids(&self.conn, "SELECT node_id FROM sensitive")
+    }
+
+    /// What must never reach an external model: sensitive (E4) or not exportable (E3).
+    pub fn home_only_nodes(&self) -> Result<Vec<NodeId>> {
+        node_ids(
+            &self.conn,
+            "SELECT node_id FROM sensitive
+             UNION SELECT node_id FROM policies WHERE exportable = 0",
+        )
     }
 
     fn append(&mut self, op: Op) -> Result<Change> {
-        let author = self.device();
         let tx = self.conn.transaction()?;
-
-        let tip: Option<LedgerEntry> = tx
-            .query_row(
-                "SELECT head, hash, sig, content FROM ledger
-                 WHERE author = ?1 ORDER BY seq DESC LIMIT 1",
-                [author.0.as_slice()],
-                raw_entry,
-            )
-            .optional()?
-            .map(decode_entry)
-            .transpose()?;
-
-        // Load what the core rules need, then let the core decide (same rules on every platform).
-        let referenced: Vec<NodeId> = match &op {
-            Op::CreateNode { .. } => vec![],
-            Op::UpdateNode { node, .. } | Op::MarkSensitive { node, .. } => vec![*node],
-            Op::Link { from, to, .. } => vec![*from, *to],
-            Op::AcceptProposal { proposal } | Op::RejectProposal { proposal } => {
-                std::iter::once(proposal.goal)
-                    .chain(proposal.sources.iter().copied())
-                    .collect()
-            }
-        };
-        let mut known = HashMap::new();
-        for id in referenced {
-            if let Some(n) = read_node(&tx, &id)? {
-                known.insert(id, n);
-            }
-        }
-        let duplicate = match &op {
-            Op::Link { from, to, kind } => edge_exists(&tx, from, to, *kind)?,
-            _ => false,
-        };
-
-        let entry = self.signer.append(tip.as_ref(), now_ms(), op);
-        let change =
-            Change::of(&entry, |id| known.get(id).cloned(), |_, _, _| duplicate).map_err(|e| {
-                match e {
-                    ApplyError::UnknownNode(id) => Error::UnknownNode(id),
-                    ApplyError::SelfLink => {
-                        Error::Invalid("Ein Knoten kann nicht mit sich selbst verbunden werden")
-                    }
-                    ApplyError::DuplicateEdge => Error::Invalid("Diese Verbindung gibt es schon"),
-                    ApplyError::NoSources => {
-                        Error::Invalid("Ein Vorschlag ohne Quellen wird verworfen")
-                    }
-                    ApplyError::EmptyTitle => Error::Invalid("Titel darf nicht leer sein"),
-                    ApplyError::Undecodable(_) => Error::Invalid("Eintrag nicht lesbar"),
-                }
-            })?;
-
-        tx.execute(
-            "INSERT INTO ledger (author, seq, hash, sig, head, content)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                author.0.as_slice(),
-                entry.head.seq as i64,
-                entry.hash.0.as_slice(),
-                entry.sig.0.as_slice(),
-                postcard::to_allocvec(&entry.head)?,
-                entry
-                    .content
-                    .as_ref()
-                    .map(postcard::to_allocvec)
-                    .transpose()?
-            ],
-        )?;
-        match &change {
-            Change::Node(node) => write_node(&tx, node)?,
-            Change::Edge(edge) => write_edge(&tx, edge)?,
-            Change::Accepted { node, edge } => {
-                write_node(&tx, node)?;
-                write_edge(&tx, edge)?
-            }
-            Change::Rejected => 0,
-            Change::Sensitivity {
-                node,
-                sensitive: true,
-            } => tx.execute(
-                "INSERT OR IGNORE INTO sensitive (node_id) VALUES (?1)",
-                [node.0.as_slice()],
-            )?,
-            Change::Sensitivity {
-                node,
-                sensitive: false,
-            } => tx.execute(
-                "DELETE FROM sensitive WHERE node_id = ?1",
-                [node.0.as_slice()],
-            )?,
-        };
+        let change = append_in(&tx, &self.signer, op)?;
         tx.commit()?;
+        if matches!(&change, Change::Deleted { prune, .. } if !prune.is_empty()) {
+            // Removed content must not survive in the write-ahead log either.
+            self.conn
+                .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        }
         Ok(change)
     }
+}
 
+/// What the core rules need to know, loaded from SQLite before an append.
+#[derive(Default)]
+struct Known {
+    nodes: HashMap<NodeId, Node>,
+    edge: Option<Edge>,
+    duplicate: bool,
+    policy: Policy,
+}
+
+impl Lookup for Known {
+    fn node(&self, id: &NodeId) -> Option<Node> {
+        self.nodes.get(id).cloned()
+    }
+
+    fn edge(&self, id: &EdgeId) -> Option<Edge> {
+        self.edge.clone().filter(|e| e.id == *id)
+    }
+
+    fn has_edge(&self, _: &NodeId, _: &NodeId, _: EdgeKind) -> bool {
+        self.duplicate
+    }
+
+    fn policy(&self, _: &NodeId) -> Policy {
+        self.policy
+    }
+}
+
+/// Signs `op` onto this device's chain and updates the projection, inside `tx`.
+fn append_in(tx: &Connection, signer: &Signer, op: Op) -> Result<Change> {
+    let author = signer.public();
+    let tip: Option<LedgerEntry> = tx
+        .query_row(
+            "SELECT head, hash, sig, content FROM ledger
+             WHERE author = ?1 ORDER BY seq DESC LIMIT 1",
+            [author.0.as_slice()],
+            raw_entry,
+        )
+        .optional()?
+        .map(decode_entry)
+        .transpose()?;
+
+    // Load what the core rules need, then let the core decide (same rules on every platform).
+    let mut known = Known::default();
+    let referenced: Vec<NodeId> = match &op {
+        Op::CreateNode { .. } | Op::Unlink { .. } => vec![],
+        Op::UpdateNode { node, .. }
+        | Op::MarkSensitive { node, .. }
+        | Op::DeleteNode { node }
+        | Op::SetPolicy { node, .. } => vec![*node],
+        Op::Link { from, to, .. } => vec![*from, *to],
+        Op::AcceptProposal { proposal } | Op::RejectProposal { proposal } => {
+            std::iter::once(proposal.goal)
+                .chain(proposal.sources.iter().copied())
+                .collect()
+        }
+    };
+    for id in referenced {
+        if let Some(n) = read_node(tx, &id)? {
+            known.nodes.insert(id, n);
+        }
+    }
+    match &op {
+        Op::Link { from, to, kind } => known.duplicate = edge_exists(tx, from, to, *kind)?,
+        Op::Unlink { edge } => known.edge = read_edge(tx, edge)?,
+        Op::DeleteNode { node } => known.policy = read_policy(tx, node)?,
+        _ => {}
+    }
+
+    let entry = signer.append(tip.as_ref(), now_ms(), op);
+    let change = Change::of(&entry, &known).map_err(|e| match e {
+        ApplyError::UnknownNode(id) => Error::UnknownNode(id),
+        ApplyError::UnknownEdge(id) => Error::UnknownEdge(id),
+        ApplyError::SelfLink => {
+            Error::Invalid("Ein Knoten kann nicht mit sich selbst verbunden werden")
+        }
+        ApplyError::DuplicateEdge => Error::Invalid("Diese Verbindung gibt es schon"),
+        ApplyError::NoSources => Error::Invalid("Ein Vorschlag ohne Quellen wird verworfen"),
+        ApplyError::EmptyTitle => Error::Invalid("Titel darf nicht leer sein"),
+        ApplyError::Undecodable(_) => Error::Invalid("Eintrag nicht lesbar"),
+    })?;
+
+    tx.execute(
+        "INSERT INTO ledger (author, seq, hash, sig, head, content)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            author.0.as_slice(),
+            entry.head.seq as i64,
+            entry.hash.0.as_slice(),
+            entry.sig.0.as_slice(),
+            postcard::to_allocvec(&entry.head)?,
+            entry
+                .content
+                .as_ref()
+                .map(postcard::to_allocvec)
+                .transpose()?
+        ],
+    )?;
+    project(tx, &change)?;
+    Ok(change)
+}
+
+/// Applies a change to the projection tables — the SQLite twin of `State::apply`.
+fn project(tx: &Connection, change: &Change) -> Result<()> {
+    match change {
+        Change::Node(node) => {
+            write_node(tx, node)?;
+        }
+        Change::Edge(edge) => {
+            write_edge(tx, edge)?;
+        }
+        Change::Accepted { node, edge } => {
+            write_node(tx, node)?;
+            write_edge(tx, edge)?;
+        }
+        Change::Rejected => {}
+        Change::Sensitivity {
+            node,
+            sensitive: true,
+        } => {
+            tx.execute(
+                "INSERT OR IGNORE INTO sensitive (node_id) VALUES (?1)",
+                [node.0.as_slice()],
+            )?;
+        }
+        Change::Sensitivity {
+            node,
+            sensitive: false,
+        } => {
+            tx.execute(
+                "DELETE FROM sensitive WHERE node_id = ?1",
+                [node.0.as_slice()],
+            )?;
+        }
+        Change::Deleted { node, prune } => {
+            let id = node.0.as_slice();
+            tx.execute("DELETE FROM nodes WHERE id = ?1", [id])?;
+            tx.execute("DELETE FROM edges WHERE from_id = ?1 OR to_id = ?1", [id])?;
+            tx.execute("DELETE FROM sensitive WHERE node_id = ?1", [id])?;
+            tx.execute("DELETE FROM policies WHERE node_id = ?1", [id])?;
+            // E2: the head stays (hash, signature), title and body go — with secure_delete.
+            for h in prune {
+                tx.execute(
+                    "UPDATE ledger SET content = NULL WHERE hash = ?1",
+                    [h.0.as_slice()],
+                )?;
+            }
+        }
+        Change::Unlinked(edge) => {
+            tx.execute("DELETE FROM edges WHERE id = ?1", [edge.0.as_slice()])?;
+        }
+        Change::Policy { node, policy } if *policy == Policy::default() => {
+            tx.execute(
+                "DELETE FROM policies WHERE node_id = ?1",
+                [node.0.as_slice()],
+            )?;
+        }
+        Change::Policy { node, policy } => {
+            tx.execute(
+                "INSERT OR REPLACE INTO policies (node_id, deletable, exportable)
+                 VALUES (?1, ?2, ?3)",
+                params![node.0.as_slice(), policy.deletable, policy.exportable],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+impl Store {
     pub fn node(&self, id: NodeId) -> Result<Option<Node>> {
         read_node(&self.conn, &id)
     }
@@ -451,6 +602,47 @@ fn read_node(conn: &Connection, id: &NodeId) -> Result<Option<Node>> {
     .map(|b| postcard::from_bytes(&b))
     .transpose()
     .map_err(Error::from)
+}
+
+fn read_edge(conn: &Connection, id: &EdgeId) -> Result<Option<Edge>> {
+    conn.query_row(
+        "SELECT edge FROM edges WHERE id = ?1",
+        [id.0.as_slice()],
+        |r| r.get::<_, Vec<u8>>(0),
+    )
+    .optional()?
+    .map(|b| postcard::from_bytes(&b))
+    .transpose()
+    .map_err(Error::from)
+}
+
+/// Only nodes that differ from the default have a row.
+fn read_policy(conn: &Connection, id: &NodeId) -> Result<Policy> {
+    Ok(conn
+        .query_row(
+            "SELECT deletable, exportable FROM policies WHERE node_id = ?1",
+            [id.0.as_slice()],
+            |r| {
+                Ok(Policy {
+                    deletable: r.get(0)?,
+                    exportable: r.get(1)?,
+                })
+            },
+        )
+        .optional()?
+        .unwrap_or_default())
+}
+
+fn node_ids(conn: &Connection, sql: &str) -> Result<Vec<NodeId>> {
+    let mut stmt = conn.prepare(sql)?;
+    let rows = stmt.query_map([], |r| r.get::<_, Vec<u8>>(0))?;
+    rows.map(|b| {
+        let bytes: [u8; 16] = b?
+            .try_into()
+            .map_err(|_| Error::Invalid("ungültige Knoten-ID in der Datenbank"))?;
+        Ok(NodeId(bytes))
+    })
+    .collect()
 }
 
 fn edge_exists(conn: &Connection, from: &NodeId, to: &NodeId, kind: EdgeKind) -> Result<bool> {
@@ -707,6 +899,91 @@ mod tests {
         let s = Store::open_dir(dir.path()).unwrap();
         assert_eq!(s.device(), device);
         assert_eq!(s.nodes(None).unwrap().len(), 1);
+        assert!(s.verify().unwrap().ok);
+    }
+
+    /// E2/E3 acceptance: after deleting a deletable node its text is gone from the database
+    /// file itself, the chain still verifies, and a node that is not deletable is only hidden.
+    #[test]
+    fn deleting_removes_the_content_from_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Store::open_dir(dir.path()).unwrap();
+        let goal = s
+            .create_node(NodeKind::Goal, "Geheimes Ziel", "Streng vertraulich")
+            .unwrap();
+        s.update_node(goal.id, "Geheimes Ziel, Fassung 2", "Noch vertraulicher")
+            .unwrap();
+        let keep = Policy {
+            deletable: false,
+            exportable: false,
+        };
+        let proof = s
+            .create_node_with(NodeKind::Evidence, "Bleibender Beleg", "", keep)
+            .unwrap();
+        assert_eq!(
+            s.entries().unwrap().len(),
+            4,
+            "node and policy, one transaction"
+        );
+        assert_eq!(s.policy(proof.id).unwrap(), keep);
+        assert_eq!(s.not_exportable_nodes().unwrap(), vec![proof.id]);
+        s.link(proof.id, goal.id, EdgeKind::Supports).unwrap();
+
+        assert_eq!(s.delete_node(goal.id).unwrap(), 2, "both versions");
+        assert!(s.node(goal.id).unwrap().is_none());
+        assert!(s.edges().unwrap().is_empty(), "its connections go with it");
+        assert!(matches!(s.delete_node(goal.id), Err(Error::UnknownNode(_))));
+        assert_eq!(
+            s.delete_node(proof.id).unwrap(),
+            0,
+            "not deletable: hidden only"
+        );
+        assert!(s.nodes(None).unwrap().is_empty());
+
+        let r = s.verify().unwrap();
+        assert!(r.ok, "{r:?}");
+        assert_eq!(r.pruned, 2);
+        drop(s);
+
+        let mut raw = Vec::new();
+        for f in ["symbiot.db", "symbiot.db-wal"] {
+            if let Ok(bytes) = std::fs::read(dir.path().join(f)) {
+                raw.extend(bytes);
+            }
+        }
+        let contains = |t: &str| raw.windows(t.len()).any(|w| w == t.as_bytes());
+        assert!(!contains("Geheimes Ziel"), "title still in the file");
+        assert!(!contains("vertraulich"), "body still in the file");
+        assert!(
+            contains("Bleibender Beleg"),
+            "a node that is not deletable keeps its content"
+        );
+    }
+
+    #[test]
+    fn unlink_and_policy_changes() {
+        let mut s = store();
+        let a = s.create_node(NodeKind::Goal, "Laufen", "").unwrap();
+        let b = s.create_node(NodeKind::Evidence, "5 km", "").unwrap();
+        let e = s.link(b.id, a.id, EdgeKind::Supports).unwrap();
+        s.unlink(e.id).unwrap();
+        assert!(s.edges().unwrap().is_empty());
+        assert!(matches!(s.unlink(e.id), Err(Error::UnknownEdge(_))));
+        // The same connection can be made again after unlinking.
+        s.link(b.id, a.id, EdgeKind::Supports).unwrap();
+
+        let strict = Policy {
+            deletable: false,
+            exportable: true,
+        };
+        s.set_policy(a.id, strict).unwrap();
+        assert_eq!(s.policy(a.id).unwrap(), strict);
+        s.set_policy(a.id, Policy::default()).unwrap();
+        assert_eq!(s.policy(a.id).unwrap(), Policy::default());
+        assert!(matches!(
+            s.set_policy(NodeId([1; 16]), strict),
+            Err(Error::UnknownNode(_))
+        ));
         assert!(s.verify().unwrap().ok);
     }
 }

@@ -1,8 +1,9 @@
-//! Detail of one node: edit it, see and add its connections, read its history.
+//! Detail of one node: edit it, see and add its connections, set its policy, read its
+//! history, delete it.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use symbiot_core::{Edge, EdgeKind, Node, NodeId, NodeKind, Op, Proposal};
+use symbiot_core::{Edge, EdgeKind, Node, NodeId, NodeKind, Op, Policy, Proposal};
 
 use crate::{api, format_ms, short};
 
@@ -38,9 +39,18 @@ pub fn Detail(
                 format!("← „{}“ {} dies", title_of(&e.from), e.kind.label())
             };
             let other = if e.from == id { e.to } else { e.from };
+            let edge = e.id;
+            let unlink = move |_| {
+                spawn_local(async move {
+                    if api::unlink(edge).await.is_ok() {
+                        on_saved();
+                    }
+                })
+            };
             view! {
                 <li>
                     <button class="link" on:click=move |_| selected.set(Some(other))>{text}</button>
+                    <button class="unlink" title="Verbindung lösen" aria-label="Verbindung lösen" on:click=unlink>"✕"</button>
                 </li>
             }
         })
@@ -51,6 +61,14 @@ pub fn Detail(
         .filter(|n| n.id != id)
         .map(|n| (n.id, format!("{}: {}", n.kind.label(), n.title)))
         .collect();
+
+    // E3: loaded once per detail, shared by the switches and the delete confirmation.
+    let policy = RwSignal::new(Policy::default());
+    spawn_local(async move {
+        if let Ok(p) = api::node_policy(id).await {
+            policy.set(p);
+        }
+    });
 
     // Bring the panel into view when a node far down the list is opened.
     let panel = NodeRef::<leptos::html::Aside>::new();
@@ -68,11 +86,13 @@ pub fn Detail(
             </div>
             <Edit node=node.clone() on_saved />
             <Sensitive id sensitive on_saved />
+            <NodePolicy id policy on_saved />
             {(node.kind == NodeKind::Goal).then(|| view! { <NextStep id nodes=nodes.clone() selected on_saved /> })}
             <h4>"Verbindungen"</h4>
             <ul class="connections">{connections}</ul>
             <Connect id targets on_saved />
             <History id refresh />
+            <Delete id policy selected on_saved />
         </aside>
     }
 }
@@ -134,6 +154,111 @@ fn Sensitive(
             "🔒 Sensibel – verlässt nie das Heimnetz"
             {move || error.get().map(|e| view! { <span class="error">{e}</span> })}
         </label>
+    }
+}
+
+/// E3: whether a node is deletable and exportable. Shared by capture and detail.
+#[component]
+pub fn PolicySwitches(
+    policy: RwSignal<Policy>,
+    on_change: impl Fn(Policy) + Copy + Send + Sync + 'static,
+) -> impl IntoView {
+    let set = move |apply: fn(&mut Policy, bool)| {
+        move |ev: leptos::ev::Event| {
+            let on = event_target_checked(&ev);
+            policy.update(|p| apply(p, on));
+            on_change(policy.get_untracked());
+        }
+    };
+    view! {
+        <div class="policy row">
+            <label class="row">
+                <input type="checkbox" prop:checked=move || policy.get().deletable on:change=set(|p, on| p.deletable = on) />
+                "Löschbar"
+            </label>
+            <label class="row">
+                <input type="checkbox" prop:checked=move || policy.get().exportable on:change=set(|p, on| p.exportable = on) />
+                "Exportierbar"
+            </label>
+        </div>
+        {move || (!policy.get().deletable).then(|| view! {
+            <p class="hint">"Nicht löschbar: Löschen blendet den Knoten nur aus, sein Inhalt bleibt in der Kette."</p>
+        })}
+        {move || (!policy.get().exportable).then(|| view! {
+            <p class="hint">"Nicht exportierbar: Der Knoten lebt nur auf diesem Gerät. Er geht in keinen Export, kein Backup und zu keiner externen KI. Geht das Gerät verloren, ist er weg."</p>
+        })}
+    }
+}
+
+/// E3: every change of the switches is a new signed entry, visible in the chain.
+#[component]
+fn NodePolicy(
+    id: NodeId,
+    policy: RwSignal<Policy>,
+    on_saved: impl Fn() + Copy + Send + Sync + 'static,
+) -> impl IntoView {
+    let error = RwSignal::new(None::<String>);
+    let save = move |p: Policy| {
+        spawn_local(async move {
+            match api::set_policy(id, p).await {
+                Ok(()) => {
+                    error.set(None);
+                    on_saved();
+                }
+                Err(e) => error.set(Some(e)),
+            }
+        })
+    };
+    view! {
+        <PolicySwitches policy on_change=save />
+        {move || error.get().map(|e| view! { <p class="error">{e}</p> })}
+    }
+}
+
+/// E2: deleting asks first and says honestly what happens to the content.
+#[component]
+fn Delete(
+    id: NodeId,
+    policy: RwSignal<Policy>,
+    selected: RwSignal<Option<NodeId>>,
+    on_saved: impl Fn() + Copy + Send + Sync + 'static,
+) -> impl IntoView {
+    let asking = RwSignal::new(false);
+    let error = RwSignal::new(None::<String>);
+    let delete = move |_| {
+        spawn_local(async move {
+            match api::delete_node(id).await {
+                Ok(_) => {
+                    selected.set(None);
+                    on_saved();
+                }
+                Err(e) => error.set(Some(e)),
+            }
+        })
+    };
+    let consequence = move || {
+        if policy.get().deletable {
+            "Der Knoten und seine Verbindungen verschwinden. Titel und Text aller Versionen werden \
+             auf diesem Gerät entfernt, die Kette bleibt prüfbar. Eigene Geräte räumen beim \
+             Abgleich auf, fremde Geräte kann niemand dazu zwingen."
+        } else {
+            "Der Knoten ist nicht löschbar: Er wird nur ausgeblendet, sein Inhalt bleibt in der Kette."
+        }
+    };
+    view! {
+        <div class="row end">
+            <button class="chip danger" on:click=move |_| asking.set(true)>"Löschen"</button>
+        </div>
+        {move || asking.get().then(|| view! {
+            <div class="confirm" data-testid="confirm-delete">
+                <p>{consequence}</p>
+                <div class="row end">
+                    {move || error.get().map(|e| view! { <span class="error">{e}</span> })}
+                    <button class="chip" on:click=move |_| asking.set(false)>"Abbrechen"</button>
+                    <button class="danger" on:click=delete>"Endgültig löschen"</button>
+                </div>
+            </div>
+        })}
     }
 }
 

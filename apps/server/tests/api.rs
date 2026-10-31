@@ -316,6 +316,115 @@ async fn sensitive_nodes_never_reach_an_external_model() {
     assert_eq!(ai.seen.lock().unwrap().len(), 2);
 }
 
+/// E2/E3 acceptance over the API: policy at creation, unlink, delete with and without content.
+#[tokio::test]
+async fn delete_unlink_and_policy() {
+    let app = app();
+    let (_, goal) = call(
+        &app,
+        "POST",
+        "/api/nodes",
+        Some(json!({"kind": "goal", "title": "Laufen"})),
+    )
+    .await;
+    let (s, proof) = call(
+        &app,
+        "POST",
+        "/api/nodes",
+        Some(json!({"kind": "evidence", "title": "Arztbrief", "deletable": false})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED);
+    let goal = goal["id"].as_str().unwrap().to_string();
+    let proof = proof["id"].as_str().unwrap().to_string();
+
+    let (_, policy) = call(&app, "GET", &format!("/api/nodes/{goal}/policy"), None).await;
+    assert_eq!(policy, json!({"deletable": true, "exportable": true}));
+    let (_, policy) = call(&app, "GET", &format!("/api/nodes/{proof}/policy"), None).await;
+    assert_eq!(policy, json!({"deletable": false, "exportable": true}));
+    assert_eq!(entries(&app).await, 3, "node and its policy");
+
+    let (_, edge) = call(
+        &app,
+        "POST",
+        "/api/edges",
+        Some(json!({"from": proof, "to": goal, "kind": "supports"})),
+    )
+    .await;
+    let edge = edge["id"].as_str().unwrap();
+    let (s, _) = call(&app, "DELETE", &format!("/api/edges/{edge}"), None).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = call(&app, "DELETE", &format!("/api/edges/{edge}"), None).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    let (s, d) = call(&app, "DELETE", &format!("/api/nodes/{goal}"), None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(d["pruned"], 1);
+    let (s, d) = call(&app, "DELETE", &format!("/api/nodes/{proof}"), None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(d["pruned"], 0, "not deletable: hidden only");
+    let (_, all) = call(&app, "GET", "/api/nodes", None).await;
+    assert_eq!(all, json!([]));
+    let (s, _) = call(&app, "GET", &format!("/api/nodes/{goal}"), None).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // Loosening the policy of a deleted node is refused; the chain stays valid.
+    let (s, _) = call(
+        &app,
+        "PUT",
+        &format!("/api/nodes/{proof}/policy"),
+        Some(json!({"deletable": true})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let (_, report) = call(&app, "GET", "/api/ledger/verify", None).await;
+    assert_eq!(report["ok"], true);
+    assert_eq!(report["entries"], 7);
+    assert_eq!(report["pruned"], 1);
+}
+
+/// E3: a node that is not exportable stays away from an external model, like a sensitive one.
+#[tokio::test]
+async fn not_exportable_nodes_never_reach_an_external_model() {
+    let (app, ai) = app_with_ai();
+    let (_, goal) = call(
+        &app,
+        "POST",
+        "/api/nodes",
+        Some(json!({"kind": "goal", "title": "Umziehen"})),
+    )
+    .await;
+    let (_, local) = call(
+        &app,
+        "POST",
+        "/api/nodes",
+        Some(json!({"kind": "reflection", "title": "Mietvertrag", "exportable": false})),
+    )
+    .await;
+    let goal = goal["id"].as_str().unwrap().to_string();
+    let local = local["id"].as_str().unwrap().to_string();
+
+    let propose = format!("/api/nodes/{goal}/propose");
+    let (s, _) = call(&app, "POST", &propose, Some(json!({"remote": true}))).await;
+    assert_eq!(s, StatusCode::OK);
+    {
+        let seen = ai.seen.lock().unwrap();
+        assert!(seen[0].related.iter().all(|r| r.node.id.to_hex() != local));
+        assert_eq!(seen[0].withheld, 1);
+    }
+
+    call(
+        &app,
+        "PUT",
+        &format!("/api/nodes/{goal}/policy"),
+        Some(json!({"exportable": false})),
+    )
+    .await;
+    let (s, _) = call(&app, "POST", &propose, Some(json!({"remote": true}))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert_eq!(ai.seen.lock().unwrap().len(), 1);
+}
+
 #[tokio::test]
 async fn without_ai_the_rest_still_works() {
     let app = app();

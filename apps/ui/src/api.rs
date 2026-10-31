@@ -3,7 +3,9 @@
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use symbiot_core::{Edge, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Proposal, VerifyReport};
+use symbiot_core::{
+    Edge, EdgeId, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal, VerifyReport,
+};
 use wasm_bindgen::{JsCast, JsValue};
 
 pub type ApiResult<T> = Result<T, String>;
@@ -23,14 +25,28 @@ pub async fn list_nodes(kind: Option<NodeKind>) -> ApiResult<Vec<Node>> {
     http_json(gloo_net::http::Request::get(&url).build()).await
 }
 
-pub async fn create_node(kind: NodeKind, title: String, body: String) -> ApiResult<Node> {
+pub async fn create_node(
+    kind: NodeKind,
+    title: String,
+    body: String,
+    policy: Policy,
+) -> ApiResult<Node> {
+    // Flat fields, not `#[serde(flatten)]`: serde_wasm_bindgen would turn that into a JS Map.
     #[derive(Serialize)]
     struct Args {
         kind: NodeKind,
         title: String,
         body: String,
+        deletable: bool,
+        exportable: bool,
     }
-    let args = Args { kind, title, body };
+    let args = Args {
+        kind,
+        title,
+        body,
+        deletable: policy.deletable,
+        exportable: policy.exportable,
+    };
     if tauri_invoke_fn().is_some() {
         return invoke("create_node", &args).await;
     }
@@ -50,6 +66,68 @@ pub async fn update_node(id: NodeId, title: String, body: String) -> ApiResult<N
     }
     let url = format!("/api/nodes/{id}");
     http_json(gloo_net::http::Request::put(&url).json(&args)).await
+}
+
+/// E2: deletes a node. Returns how many entries lost their content (0 if not deletable).
+pub async fn delete_node(id: NodeId) -> ApiResult<usize> {
+    #[derive(Serialize)]
+    struct Args {
+        id: NodeId,
+    }
+    if tauri_invoke_fn().is_some() {
+        return invoke("delete_node", &Args { id }).await;
+    }
+    #[derive(Deserialize)]
+    struct Deleted {
+        pruned: usize,
+    }
+    let url = format!("/api/nodes/{id}");
+    let d: Deleted = http_json(gloo_net::http::Request::delete(&url).build()).await?;
+    Ok(d.pruned)
+}
+
+pub async fn node_policy(id: NodeId) -> ApiResult<Policy> {
+    #[derive(Serialize)]
+    struct Args {
+        id: NodeId,
+    }
+    if tauri_invoke_fn().is_some() {
+        return invoke("node_policy", &Args { id }).await;
+    }
+    let url = format!("/api/nodes/{id}/policy");
+    http_json(gloo_net::http::Request::get(&url).build()).await
+}
+
+/// E3: every change is a new entry in the chain.
+pub async fn set_policy(id: NodeId, policy: Policy) -> ApiResult<()> {
+    #[derive(Serialize)]
+    struct Args {
+        id: NodeId,
+        deletable: bool,
+        exportable: bool,
+    }
+    if tauri_invoke_fn().is_some() {
+        let args = Args {
+            id,
+            deletable: policy.deletable,
+            exportable: policy.exportable,
+        };
+        return invoke("set_policy", &args).await;
+    }
+    let url = format!("/api/nodes/{id}/policy");
+    http_empty(gloo_net::http::Request::put(&url).json(&policy)).await
+}
+
+pub async fn unlink(id: EdgeId) -> ApiResult<()> {
+    #[derive(Serialize)]
+    struct Args {
+        id: EdgeId,
+    }
+    if tauri_invoke_fn().is_some() {
+        return invoke("unlink_edge", &Args { id }).await;
+    }
+    let url = format!("/api/edges/{id}");
+    http_empty(gloo_net::http::Request::delete(&url).build()).await
 }
 
 pub async fn node_history(id: NodeId) -> ApiResult<Vec<LedgerEntry>> {

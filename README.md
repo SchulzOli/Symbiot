@@ -21,7 +21,7 @@ Hervorgegangen aus dem Ideengarten *TrustInAI*. Benannt nach der *Symbiose Mensc
 ## Aufbau
 | Teil | Rolle |
 |---|---|
-| `crates/symbiot-core` | `no_std`-Kern: Knoten, signierte Hash-Kette, Prüfung, Projektion |
+| `crates/symbiot-core` | `no_std`-Kern: Knoten, signierte Hash-Kette (Kopf + entfernbarer Inhalt), Prüfung, Projektion |
 | `crates/symbiot-store` | SQLite: Kette als Wahrheit, Knoten als Projektion, Geräteschlüssel |
 | `crates/symbiot-ai` | „Nächsten Schritt vorschlagen“: Kontext, Anfrage an LiteLLM, Prüfung der Quellen. Schreibt nie |
 | `apps/ui` | Leptos-Oberfläche, im Browser über `/api`, in Tauri über `invoke` |
@@ -54,6 +54,7 @@ cd apps/desktop && cargo tauri dev
 - **M1 Walking Skeleton:** fertig (v0.1.0, läuft auf sz; Alarme bewusst weggelassen)
 - **M2 Verknüpfen:** Kanten, Graph, Bearbeiten mit Verlauf, E2E-Test
 - **M3 Mitdenken:** KI-Vorschlag mit Quellen, Annehmen/Ablehnen im Ledger, sensible Knoten, Feedback-Link. Offen: Woche Dogfooding (Checkpoint)
+- **Vor M4:** Kettenformat v2 (Protokoll 2) mit Löschen, „löschbar“ und „exportierbar“ pro Knoten (E2, E3, E13)
 
 End-to-End-Test lokal (braucht `trunk build --release` in `apps/ui`):
 ```bash

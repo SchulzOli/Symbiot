@@ -75,9 +75,31 @@ pub struct Node {
     pub history: Vec<Hash>,
 }
 
+/// Whether a node may be deleted for real and may leave the own devices (E3).
+/// Not part of the node: a separate entry, so nodes keep the same shape everywhere.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Policy {
+    /// Deleting removes the content (E2). Otherwise deleting only hides the node.
+    pub deletable: bool,
+    /// May go to other people's devices and to a hosted AI. Otherwise it stays on the
+    /// own devices — and is not in the own backup either (E5).
+    pub exportable: bool,
+}
+
+impl Default for Policy {
+    fn default() -> Self {
+        Policy {
+            deletable: true,
+            exportable: true,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ApplyError {
     UnknownNode(NodeId),
+    UnknownEdge(EdgeId),
     SelfLink,
     DuplicateEdge,
     /// A proposal must name the nodes it is based on.
@@ -91,6 +113,7 @@ impl fmt::Display for ApplyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ApplyError::UnknownNode(id) => write!(f, "Knoten {id} existiert nicht"),
+            ApplyError::UnknownEdge(id) => write!(f, "Verbindung {id} existiert nicht"),
             ApplyError::SelfLink => {
                 f.write_str("Ein Knoten kann nicht mit sich selbst verbunden werden")
             }
@@ -119,19 +142,36 @@ pub enum Change {
         node: NodeId,
         sensitive: bool,
     },
+    /// The node and its connections disappear. `prune` lists the entries whose content
+    /// every device removes — all versions if the node is deletable, none otherwise.
+    Deleted {
+        node: NodeId,
+        prune: Vec<Hash>,
+    },
+    Unlinked(EdgeId),
+    Policy {
+        node: NodeId,
+        policy: Policy,
+    },
+}
+
+/// What the rules need to know about the current projection. Implemented by [`State`]
+/// and by the SQLite store, so every platform applies the same rules.
+pub trait Lookup {
+    /// The current version of a node; `None` if unknown or deleted.
+    fn node(&self, id: &NodeId) -> Option<Node>;
+    fn edge(&self, id: &EdgeId) -> Option<Edge>;
+    /// Whether the same connection already exists.
+    fn has_edge(&self, from: &NodeId, to: &NodeId, kind: EdgeKind) -> bool;
+    fn policy(&self, id: &NodeId) -> Policy;
 }
 
 impl Change {
-    /// Derives the effect of `e`. `node` looks up the current version of a node,
-    /// `has_edge` tells whether the same connection already exists. Shared by
-    /// [`State`] and the SQLite store, so every platform applies the same rules.
-    pub fn of(
-        e: &LedgerEntry,
-        node: impl Fn(&NodeId) -> Option<Node>,
-        has_edge: impl Fn(&NodeId, &NodeId, EdgeKind) -> bool,
-    ) -> Result<Change, ApplyError> {
+    /// Derives the effect of `e` on the projection seen through `view`.
+    pub fn of(e: &LedgerEntry, view: &impl Lookup) -> Result<Change, ApplyError> {
         let op = e.op().map_err(ApplyError::Undecodable)?;
         let (author, ts_ms) = (e.head.author, e.head.ts_ms);
+        let known = |id: &NodeId| view.node(id).ok_or(ApplyError::UnknownNode(*id));
         match &op {
             Op::CreateNode { kind, title, body } => Ok(Change::Node(Node {
                 id: NodeId::from_entry_hash(&e.hash),
@@ -149,7 +189,7 @@ impl Change {
                 title,
                 body,
             } => {
-                let mut n = node(id).ok_or(ApplyError::UnknownNode(*id))?;
+                let mut n = known(id)?;
                 n.title = title.clone();
                 n.body = body.clone();
                 n.version += 1;
@@ -161,12 +201,9 @@ impl Change {
                 if from == to {
                     return Err(ApplyError::SelfLink);
                 }
-                for id in [from, to] {
-                    if node(id).is_none() {
-                        return Err(ApplyError::UnknownNode(*id));
-                    }
-                }
-                if has_edge(from, to, *kind) {
+                known(from)?;
+                known(to)?;
+                if view.has_edge(from, to, *kind) {
                     return Err(ApplyError::DuplicateEdge);
                 }
                 Ok(Change::Edge(Edge {
@@ -180,7 +217,7 @@ impl Change {
                 }))
             }
             Op::AcceptProposal { proposal: p } => {
-                check_proposal(p, &node)?;
+                check_proposal(p, view)?;
                 let id = NodeId::from_entry_hash(&e.hash);
                 Ok(Change::Accepted {
                     node: Node {
@@ -206,17 +243,44 @@ impl Change {
                 })
             }
             Op::RejectProposal { proposal: p } => {
-                check_proposal(p, &node)?;
+                check_proposal(p, view)?;
                 Ok(Change::Rejected)
             }
             Op::MarkSensitive {
                 node: id,
                 sensitive,
             } => {
-                node(id).ok_or(ApplyError::UnknownNode(*id))?;
+                known(id)?;
                 Ok(Change::Sensitivity {
                     node: *id,
                     sensitive: *sensitive,
+                })
+            }
+            Op::DeleteNode { node: id } => {
+                let n = known(id)?;
+                let prune = if view.policy(id).deletable {
+                    n.history
+                } else {
+                    Vec::new()
+                };
+                Ok(Change::Deleted { node: *id, prune })
+            }
+            Op::Unlink { edge } => {
+                view.edge(edge).ok_or(ApplyError::UnknownEdge(*edge))?;
+                Ok(Change::Unlinked(*edge))
+            }
+            Op::SetPolicy {
+                node: id,
+                deletable,
+                exportable,
+            } => {
+                known(id)?;
+                Ok(Change::Policy {
+                    node: *id,
+                    policy: Policy {
+                        deletable: *deletable,
+                        exportable: *exportable,
+                    },
                 })
             }
         }
@@ -224,7 +288,7 @@ impl Change {
 }
 
 /// Same rules for accepting and rejecting: a proposal names a known goal and known sources.
-fn check_proposal(p: &Proposal, node: &impl Fn(&NodeId) -> Option<Node>) -> Result<(), ApplyError> {
+fn check_proposal(p: &Proposal, view: &impl Lookup) -> Result<(), ApplyError> {
     if p.title.trim().is_empty() {
         return Err(ApplyError::EmptyTitle);
     }
@@ -232,7 +296,7 @@ fn check_proposal(p: &Proposal, node: &impl Fn(&NodeId) -> Option<Node>) -> Resu
         return Err(ApplyError::NoSources);
     }
     for id in core::iter::once(&p.goal).chain(&p.sources) {
-        if node(id).is_none() {
+        if view.node(id).is_none() {
             return Err(ApplyError::UnknownNode(*id));
         }
     }
@@ -246,19 +310,33 @@ pub struct State {
     pub nodes: BTreeMap<NodeId, Node>,
     pub edges: BTreeMap<EdgeId, Edge>,
     pub sensitive: BTreeSet<NodeId>,
+    /// Only nodes whose policy differs from the default.
+    pub policies: BTreeMap<NodeId, Policy>,
+}
+
+impl Lookup for State {
+    fn node(&self, id: &NodeId) -> Option<Node> {
+        self.nodes.get(id).cloned()
+    }
+
+    fn edge(&self, id: &EdgeId) -> Option<Edge> {
+        self.edges.get(id).cloned()
+    }
+
+    fn has_edge(&self, from: &NodeId, to: &NodeId, kind: EdgeKind) -> bool {
+        self.edges
+            .values()
+            .any(|x| x.from == *from && x.to == *to && x.kind == kind)
+    }
+
+    fn policy(&self, id: &NodeId) -> Policy {
+        self.policies.get(id).copied().unwrap_or_default()
+    }
 }
 
 impl State {
     pub fn apply(&mut self, e: &LedgerEntry) -> Result<Change, ApplyError> {
-        let change = Change::of(
-            e,
-            |id| self.nodes.get(id).cloned(),
-            |from, to, kind| {
-                self.edges
-                    .values()
-                    .any(|x| x.from == *from && x.to == *to && x.kind == kind)
-            },
-        )?;
+        let change = Change::of(e, self)?;
         match &change {
             Change::Node(n) => {
                 self.nodes.insert(n.id, n.clone());
@@ -276,6 +354,22 @@ impl State {
                     self.sensitive.insert(*node);
                 } else {
                     self.sensitive.remove(node);
+                }
+            }
+            Change::Deleted { node, .. } => {
+                self.nodes.remove(node);
+                self.edges.retain(|_, x| x.from != *node && x.to != *node);
+                self.sensitive.remove(node);
+                self.policies.remove(node);
+            }
+            Change::Unlinked(edge) => {
+                self.edges.remove(edge);
+            }
+            Change::Policy { node, policy } => {
+                if *policy == Policy::default() {
+                    self.policies.remove(node);
+                } else {
+                    self.policies.insert(*node, *policy);
                 }
             }
         }
@@ -502,5 +596,148 @@ mod tests {
         assert_eq!(st.nodes[&id], node);
         st.apply(&off).unwrap();
         assert!(st.sensitive.is_empty());
+    }
+
+    /// E2/E3: deleting removes node and connections; only a deletable node loses its content.
+    #[test]
+    fn delete_unlink_and_policy() {
+        let s = Signer::from_seed([5; 32]);
+        let mut st = State::default();
+        let mut chain: Vec<LedgerEntry> = Vec::new();
+        let mut push = |st: &mut State, op: Op| {
+            let e = s.append(chain.last(), chain.len() as u64, op);
+            chain.push(e.clone());
+            st.apply(&e)
+        };
+        let create = |title: &str| Op::CreateNode {
+            kind: NodeKind::Goal,
+            title: title.into(),
+            body: String::new(),
+        };
+        let node_of = |c: Result<Change, ApplyError>| match c.unwrap() {
+            Change::Node(n) => n,
+            other => panic!("{other:?}"),
+        };
+        let a = node_of(push(&mut st, create("Ziel")));
+        let b = node_of(push(&mut st, create("Beleg")));
+        let a2 = node_of(push(
+            &mut st,
+            Op::UpdateNode {
+                node: a.id,
+                title: "Ziel 2".into(),
+                body: String::new(),
+            },
+        ));
+        let Ok(Change::Edge(edge)) = push(
+            &mut st,
+            Op::Link {
+                from: b.id,
+                to: a.id,
+                kind: EdgeKind::Supports,
+            },
+        ) else {
+            panic!()
+        };
+
+        // Unlink removes only the edge; a second time it is unknown.
+        let unlink = Op::Unlink { edge: edge.id };
+        assert_eq!(push(&mut st, unlink.clone()), Ok(Change::Unlinked(edge.id)));
+        assert_eq!(push(&mut st, unlink), Err(ApplyError::UnknownEdge(edge.id)));
+        assert_eq!(st.nodes.len(), 2);
+
+        // A node that is not deletable is only hidden: nothing to prune.
+        let keep = Op::SetPolicy {
+            node: b.id,
+            deletable: false,
+            exportable: false,
+        };
+        assert!(push(&mut st, keep).is_ok());
+        assert!(!st.policy(&b.id).deletable && !st.policy(&b.id).exportable);
+        assert_eq!(
+            push(&mut st, Op::DeleteNode { node: b.id }),
+            Ok(Change::Deleted {
+                node: b.id,
+                prune: Vec::new()
+            })
+        );
+
+        // A deletable node (the default) prunes every version; its edges go with it.
+        let c = node_of(push(&mut st, create("Wert")));
+        push(
+            &mut st,
+            Op::Link {
+                from: a.id,
+                to: c.id,
+                kind: EdgeKind::RelatesTo,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            push(&mut st, Op::DeleteNode { node: a.id }),
+            Ok(Change::Deleted {
+                node: a.id,
+                prune: a2.history.clone()
+            })
+        );
+        assert_eq!(a2.history.len(), 2);
+        assert!(st.edges.is_empty(), "edges of a deleted node disappear");
+        assert_eq!(st.nodes.len(), 1);
+
+        // A deleted node is gone for every later rule.
+        assert_eq!(
+            push(
+                &mut st,
+                Op::UpdateNode {
+                    node: a.id,
+                    title: "zurück".into(),
+                    body: String::new()
+                }
+            ),
+            Err(ApplyError::UnknownNode(a.id))
+        );
+        assert_eq!(
+            push(&mut st, Op::DeleteNode { node: a.id }),
+            Err(ApplyError::UnknownNode(a.id))
+        );
+    }
+
+    #[test]
+    fn policy_can_be_loosened_again() {
+        let s = Signer::from_seed([6; 32]);
+        let c = s.append(
+            None,
+            1,
+            Op::CreateNode {
+                kind: NodeKind::Evidence,
+                title: "Beleg".into(),
+                body: String::new(),
+            },
+        );
+        let id = NodeId::from_entry_hash(&c.hash);
+        let strict = s.append(
+            Some(&c),
+            2,
+            Op::SetPolicy {
+                node: id,
+                deletable: false,
+                exportable: true,
+            },
+        );
+        let loose = s.append(
+            Some(&strict),
+            3,
+            Op::SetPolicy {
+                node: id,
+                deletable: true,
+                exportable: true,
+            },
+        );
+        let mut st = State::default();
+        st.apply(&c).unwrap();
+        st.apply(&strict).unwrap();
+        assert!(!st.policy(&id).deletable);
+        st.apply(&loose).unwrap();
+        assert_eq!(st.policy(&id), Policy::default());
+        assert!(st.policies.is_empty());
     }
 }
