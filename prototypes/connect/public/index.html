@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connect – egal mit was</title>
+  <meta name="description" content="Prototyp von Connect, der Interoperabilitätsplattform für den Austausch zwischen Menschen, Maschinen, Daten und dem eigenen Gedächtnis – als 3D-Graph.">
+  <link rel="stylesheet" href="style.css">
+  <script src="data.js" defer></script>
+  <script src="graph.js" defer></script>
+</head>
+<body>
+  <canvas id="scene" aria-label="3D-Graph der Plattform Connect. Knoten lassen sich über die Liste rechts auswählen."></canvas>
+
+  <header class="intro">
+    <h1>Connect<span class="dot">.</span></h1>
+    <p class="claim">Egal mit was.</p>
+    <p class="lead">
+      Das ist, was ich will. Das ist, was der andere will.
+      Eine Plattform für den Austausch zwischen Menschen, Maschinen, Daten – und uns selbst.
+      Um mehr über die Welt zu erfahren, Wissen zu speichern und ein eigenes Gedächtnis zu besitzen.
+    </p>
+    <nav class="levels" aria-label="Stufen">
+      <div id="level-buttons" class="chips"></div>
+      <p id="level-text" class="level-text"></p>
+    </nav>
+    <nav class="scenarios" aria-label="Szenarien">
+      <span class="label">Austausch abspielen:</span>
+      <div id="scenario-buttons" class="chips"></div>
+      <a class="film-link" href="film.html">🎬 Film: Ein Tag mit meinem Symbiot</a>
+    </nav>
+  </header>
+
+  <aside id="panel" class="panel" aria-live="polite">
+    <div id="panel-empty">
+      <h2>Den Graphen erkunden</h2>
+      <p>Ziehen zum Drehen, Mausrad oder Pinch zum Zoomen, Klick auf einen Knoten für Details.</p>
+      <ul id="legend" class="legend"></ul>
+    </div>
+    <div id="panel-node" hidden>
+      <p id="node-group" class="group-tag"></p>
+      <h2 id="node-title"></h2>
+      <p id="node-desc"></p>
+      <h3>Verbunden mit</h3>
+      <ul id="node-links" class="links"></ul>
+      <button id="node-close" class="ghost" type="button">Zurück zur Übersicht</button>
+    </div>
+  </aside>
+
+  <section id="story" class="story" hidden aria-live="polite">
+    <p id="story-title" class="story-title"></p>
+    <p id="story-text" class="story-text"></p>
+    <div id="story-details" class="story-details" hidden>
+      <dl class="facts">
+        <div><dt>⚙️ Technik</dt><dd id="fact-stack"></dd></div>
+        <div><dt>🖥️ Server</dt><dd id="fact-server"></dd></div>
+        <div><dt>👤 Owner</dt><dd id="fact-owner"></dd></div>
+        <div><dt>🧩 Datensets</dt><dd><ul id="fact-data" class="data-list"></ul></dd></div>
+      </dl>
+      <div id="plugin" class="plugin">
+        <p class="plugin-name"><span>Anzeige · Plugin</span> <strong id="plugin-name"></strong></p>
+        <div id="plugin-body" class="plugin-body"></div>
+      </div>
+    </div>
+    <div class="story-controls">
+      <span id="story-progress" class="story-progress"></span>
+      <button id="story-prev" class="ghost" type="button" aria-label="Vorheriger Schritt">←</button>
+      <button id="story-next" class="ghost" type="button" aria-label="Nächster Schritt">→</button>
+      <button id="story-stop" class="ghost" type="button">Beenden</button>
+    </div>
+  </section>
+
+  <details class="index">
+    <summary>Alle Knoten als Liste</summary>
+    <div id="node-index"></div>
+  </details>
+
+  <button id="sound" class="ghost sound" type="button" aria-pressed="false">🔇 Ton aus</button>
+
+  <footer class="foot">
+    Prototyp · Visualisierung der Idee, nicht der fertigen Plattform · keine Tracker, keine fremden Server
+  </footer>
+
+  <noscript><p class="noscript">Der 3D-Graph braucht JavaScript.</p></noscript>
+</body>
+</html>
