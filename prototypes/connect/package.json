@@ -1,0 +1,14 @@
+{
+  "name": "connect",
+  "version": "0.1.0",
+  "description": "Connect – Prototyp der Interoperabilitätsplattform als interaktiver 3D-Graph.",
+  "private": true,
+  "license": "MIT",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
