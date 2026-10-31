@@ -15,6 +15,7 @@ use crate::PROTOCOL_VERSION;
 use crate::bytes::{Hash, NodeId, PubKey, Sig};
 use crate::edge::EdgeKind;
 use crate::node::NodeKind;
+use crate::proposal::Proposal;
 
 /// What an entry does. Editing never overwrites — it appends an `UpdateNode`.
 /// Externally tagged (serde default): postcard cannot read internally tagged enums.
@@ -38,6 +39,13 @@ pub enum Op {
         to: NodeId,
         kind: EdgeKind,
     },
+    /// The human accepted an AI proposal: a new node that derives from `proposal.goal`.
+    AcceptProposal { proposal: Proposal },
+    /// The human rejected an AI proposal. The graph stays as it is; the decision is kept.
+    RejectProposal { proposal: Proposal },
+    /// Marks a node as sensitive (or not): sensitive nodes never leave the home network.
+    /// A separate entry, not a node field, so nodes keep the same shape everywhere.
+    MarkSensitive { node: NodeId, sensitive: bool },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -30,6 +30,13 @@ Die KI schlägt den nächsten Schritt vor, ich entscheide.
 - Der Vorschlag nennt seine **Quellen** (Knoten-IDs). Ein Vorschlag ohne Quellen wird verworfen.
 - Annehmen oder Ablehnen wird als Eintrag ins Ledger geschrieben. Angenommen = neuer Knoten.
 - **Fertig, wenn:** Kein Vorschlag ändert Daten ohne deinen Klick (Test). Bei sensiblen Knoten verlässt nichts das Heimnetz.
+  ✅ Der Vorschlag lebt nur in der Oberfläche, bis du klickst. Annehmen (`Op::AcceptProposal`) und Ablehnen
+  (`Op::RejectProposal`) sind signierte Einträge mit dem ganzen Vorschlag; angenommen = neuer Knoten mit Kante
+  „ist abgeleitet von“ zum Ziel. Der Kern lehnt Vorschläge ohne oder mit unbekannten Quellen ab.
+  Sensibel markieren geht mit einem Klick an jedem Knoten (`Op::MarkSensitive`, E4); für ein externes Modell
+  bleiben sensible Knoten aus dem Kontext, ein sensibles Ziel wird gar nicht gesendet.
+  Tests: `apps/server/tests/api.rs` (Fake-KI), `crates/symbiot-ai`, `e2e/tests/mitdenken.spec.ts` (Schein-LLM).
+  Noch offen aus E4: Regel-Vorschläge der KI für Sensibilität.
 
 ## F5 — Synchron *(M4)*
 Ein Gedächtnis auf allen Geräten.

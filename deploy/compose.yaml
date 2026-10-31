@@ -15,5 +15,11 @@ services:
       SYMBIOT_ADDR: "127.0.0.1:8100"      # nur lokal; von außen nur über Tailscale-HTTPS
       RUST_LOG: info
       TZ: Europe/Berlin
+      # M3: KI über LiteLLM auf sz. Schlüssel (SYMBIOT_AI_KEY) steht nur in ./.env, nie hier.
+      SYMBIOT_AI_URL: "http://127.0.0.1:8085/v1"
+      SYMBIOT_AI_MODEL: "qwen3:8b"
+    env_file:
+      - path: ./.env
+        required: false
     volumes:
       - ./data:/data

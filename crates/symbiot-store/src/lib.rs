@@ -10,7 +10,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use symbiot_core::{
-    ApplyError, Change, Edge, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Op, PubKey, Signer,
+    ApplyError, Change, Edge, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Op, Proposal, PubKey,
+    Signer,
 };
 
 pub use symbiot_core::VerifyReport;
@@ -104,6 +105,9 @@ impl Store {
                  created_ms INTEGER NOT NULL,
                  edge       BLOB NOT NULL,
                  UNIQUE (from_id, to_id, kind)
+             );
+             CREATE TABLE IF NOT EXISTS sensitive (
+                 node_id BLOB PRIMARY KEY
              );",
         )?;
         Ok(Store { conn, signer })
@@ -125,7 +129,7 @@ impl Store {
             body: body.into(),
         })? {
             Change::Node(n) => Ok(n),
-            Change::Edge(_) => unreachable!("CreateNode yields a node"),
+            _ => unreachable!("CreateNode yields a node"),
         }
     }
 
@@ -141,7 +145,7 @@ impl Store {
             body: body.into(),
         })? {
             Change::Node(n) => Ok(n),
-            Change::Edge(_) => unreachable!("UpdateNode yields a node"),
+            _ => unreachable!("UpdateNode yields a node"),
         }
     }
 
@@ -149,8 +153,45 @@ impl Store {
     pub fn link(&mut self, from: NodeId, to: NodeId, kind: EdgeKind) -> Result<Edge> {
         match self.append(Op::Link { from, to, kind })? {
             Change::Edge(e) => Ok(e),
-            Change::Node(_) => unreachable!("Link yields an edge"),
+            _ => unreachable!("Link yields an edge"),
         }
+    }
+
+    /// F4: the human accepted an AI proposal. Signs the decision with the full proposal and
+    /// creates the new node plus its edge „derives from“ the goal.
+    pub fn accept_proposal(&mut self, proposal: Proposal) -> Result<(Node, Edge)> {
+        match self.append(Op::AcceptProposal { proposal })? {
+            Change::Accepted { node, edge } => Ok((node, edge)),
+            _ => unreachable!("AcceptProposal yields a node and an edge"),
+        }
+    }
+
+    /// F4: the human rejected an AI proposal. Only the decision is recorded; the graph stays.
+    pub fn reject_proposal(&mut self, proposal: Proposal) -> Result<()> {
+        self.append(Op::RejectProposal { proposal }).map(|_| ())
+    }
+
+    /// Marks a node as sensitive (E4): it never leaves the home network.
+    pub fn set_sensitive(&mut self, id: NodeId, sensitive: bool) -> Result<()> {
+        self.append(Op::MarkSensitive {
+            node: id,
+            sensitive,
+        })
+        .map(|_| ())
+    }
+
+    /// All nodes currently marked as sensitive.
+    pub fn sensitive_nodes(&self) -> Result<Vec<NodeId>> {
+        let mut stmt = self.conn.prepare("SELECT node_id FROM sensitive")?;
+        let rows = stmt.query_map([], |r| r.get::<_, Vec<u8>>(0))?;
+        rows.map(|b| {
+            let b = b?;
+            let bytes: [u8; 16] = b
+                .try_into()
+                .map_err(|_| Error::Invalid("ungültige Knoten-ID in der Datenbank"))?;
+            Ok(NodeId(bytes))
+        })
+        .collect()
     }
 
     fn append(&mut self, op: Op) -> Result<Change> {
@@ -170,8 +211,13 @@ impl Store {
         // Load what the core rules need, then let the core decide (same rules on every platform).
         let referenced: Vec<NodeId> = match &op {
             Op::CreateNode { .. } => vec![],
-            Op::UpdateNode { node, .. } => vec![*node],
+            Op::UpdateNode { node, .. } | Op::MarkSensitive { node, .. } => vec![*node],
             Op::Link { from, to, .. } => vec![*from, *to],
+            Op::AcceptProposal { proposal } | Op::RejectProposal { proposal } => {
+                std::iter::once(proposal.goal)
+                    .chain(proposal.sources.iter().copied())
+                    .collect()
+            }
         };
         let mut known = HashMap::new();
         for id in referenced {
@@ -193,6 +239,10 @@ impl Store {
                         Error::Invalid("Ein Knoten kann nicht mit sich selbst verbunden werden")
                     }
                     ApplyError::DuplicateEdge => Error::Invalid("Diese Verbindung gibt es schon"),
+                    ApplyError::NoSources => {
+                        Error::Invalid("Ein Vorschlag ohne Quellen wird verworfen")
+                    }
+                    ApplyError::EmptyTitle => Error::Invalid("Titel darf nicht leer sein"),
                 }
             })?;
 
@@ -206,27 +256,26 @@ impl Store {
             ],
         )?;
         match &change {
-            Change::Node(node) => tx.execute(
-                "INSERT INTO nodes (id, kind, updated_ms, node) VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT (id) DO UPDATE SET updated_ms = excluded.updated_ms, node = excluded.node",
-                params![
-                    node.id.0.as_slice(),
-                    node.kind.as_str(),
-                    node.updated_ms as i64,
-                    postcard::to_allocvec(node)?
-                ],
+            Change::Node(node) => write_node(&tx, node)?,
+            Change::Edge(edge) => write_edge(&tx, edge)?,
+            Change::Accepted { node, edge } => {
+                write_node(&tx, node)?;
+                write_edge(&tx, edge)?
+            }
+            Change::Rejected => 0,
+            Change::Sensitivity {
+                node,
+                sensitive: true,
+            } => tx.execute(
+                "INSERT OR IGNORE INTO sensitive (node_id) VALUES (?1)",
+                [node.0.as_slice()],
             )?,
-            Change::Edge(edge) => tx.execute(
-                "INSERT INTO edges (id, from_id, to_id, kind, created_ms, edge)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    edge.id.0.as_slice(),
-                    edge.from.0.as_slice(),
-                    edge.to.0.as_slice(),
-                    edge.kind.as_str(),
-                    edge.created_ms as i64,
-                    postcard::to_allocvec(edge)?
-                ],
+            Change::Sensitivity {
+                node,
+                sensitive: false,
+            } => tx.execute(
+                "DELETE FROM sensitive WHERE node_id = ?1",
+                [node.0.as_slice()],
             )?,
         };
         tx.commit()?;
@@ -282,6 +331,34 @@ impl Store {
     pub fn verify(&self) -> Result<VerifyReport> {
         Ok(VerifyReport::of(self.device(), &self.entries()?))
     }
+}
+
+fn write_node(conn: &Connection, node: &Node) -> Result<usize> {
+    Ok(conn.execute(
+        "INSERT INTO nodes (id, kind, updated_ms, node) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT (id) DO UPDATE SET updated_ms = excluded.updated_ms, node = excluded.node",
+        params![
+            node.id.0.as_slice(),
+            node.kind.as_str(),
+            node.updated_ms as i64,
+            postcard::to_allocvec(node)?
+        ],
+    )?)
+}
+
+fn write_edge(conn: &Connection, edge: &Edge) -> Result<usize> {
+    Ok(conn.execute(
+        "INSERT INTO edges (id, from_id, to_id, kind, created_ms, edge)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            edge.id.0.as_slice(),
+            edge.from.0.as_slice(),
+            edge.to.0.as_slice(),
+            edge.kind.as_str(),
+            edge.created_ms as i64,
+            postcard::to_allocvec(edge)?
+        ],
+    )?)
 }
 
 fn read_node(conn: &Connection, id: &NodeId) -> Result<Option<Node>> {
@@ -414,6 +491,75 @@ mod tests {
         let r = s.verify().unwrap();
         assert!(r.ok, "{r:?}");
         assert_eq!(r.entries, 4, "rejected links must not touch the ledger");
+    }
+
+    #[test]
+    fn proposals_change_data_only_by_decision() {
+        let mut s = store();
+        let goal = s.create_node(NodeKind::Goal, "Laufen", "").unwrap();
+        let proof = s.create_node(NodeKind::Evidence, "5 km", "").unwrap();
+        let proposal = Proposal {
+            goal: goal.id,
+            kind: NodeKind::Goal,
+            title: "Laufschuhe kaufen".into(),
+            body: "Alte Schuhe sind durch".into(),
+            sources: vec![goal.id, proof.id],
+            model: "qwen3:8b".into(),
+        };
+
+        // A proposal without sources is refused and leaves no trace.
+        let mut no_sources = proposal.clone();
+        no_sources.sources.clear();
+        assert!(matches!(
+            s.accept_proposal(no_sources),
+            Err(Error::Invalid(_))
+        ));
+        assert_eq!(s.entries().unwrap().len(), 2);
+
+        s.reject_proposal(proposal.clone()).unwrap();
+        assert_eq!(s.nodes(None).unwrap().len(), 2, "rejecting adds no node");
+        assert!(matches!(
+            &s.entries().unwrap()[2].op,
+            Op::RejectProposal { proposal: p } if p.title == "Laufschuhe kaufen"
+        ));
+
+        let (node, edge) = s.accept_proposal(proposal).unwrap();
+        assert_eq!(s.nodes(None).unwrap().len(), 3);
+        assert_eq!(
+            (edge.from, edge.to, edge.kind),
+            (node.id, goal.id, EdgeKind::DerivesFrom)
+        );
+        assert_eq!(s.edges().unwrap(), vec![edge]);
+        // The new node's provenance is the decision entry, which carries the sources.
+        let h = s.history(node.id).unwrap();
+        assert!(matches!(&h[0].op, Op::AcceptProposal { proposal: p } if p.sources.len() == 2));
+
+        let r = s.verify().unwrap();
+        assert!(r.ok, "{r:?}");
+        assert_eq!(r.entries, 4);
+    }
+
+    #[test]
+    fn sensitivity_is_recorded_and_reversible() {
+        let mut s = store();
+        let n = s
+            .create_node(NodeKind::Reflection, "Arzttermin", "")
+            .unwrap();
+        s.set_sensitive(n.id, true).unwrap();
+        s.set_sensitive(n.id, true).unwrap();
+        assert_eq!(s.sensitive_nodes().unwrap(), vec![n.id]);
+        s.set_sensitive(n.id, false).unwrap();
+        assert!(s.sensitive_nodes().unwrap().is_empty());
+        assert!(matches!(
+            s.set_sensitive(NodeId([1; 16]), true),
+            Err(Error::UnknownNode(_))
+        ));
+        assert_eq!(s.entries().unwrap().len(), 4);
+        assert_eq!(
+            s.node(n.id).unwrap().unwrap(),
+            n,
+            "the node itself is unchanged"
+        );
     }
 
     #[test]

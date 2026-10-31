@@ -1,9 +1,10 @@
 //! Symbiot desktop/mobile shell: the shared Leptos UI plus a local store.
 //! Data lives on this device (app data dir); the UI reaches it via `invoke`.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-use symbiot_core::{Edge, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, VerifyReport};
+use symbiot_ai::{Advisor, Info};
+use symbiot_core::{Edge, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Proposal, VerifyReport};
 use symbiot_store::Store;
 use tauri::{Manager, State};
 
@@ -61,6 +62,62 @@ fn link_nodes(
     store.with(|s| s.link(from, to, kind))
 }
 
+/// The AI the desktop asks: `SYMBIOT_AI_*` from the environment, e.g. LiteLLM on sz via Tailscale.
+struct Ai(Option<Arc<dyn Advisor>>);
+
+#[tauri::command]
+fn ai_info(ai: State<Ai>) -> Info {
+    ai.0.as_ref().map(|a| a.info()).unwrap_or_default()
+}
+
+/// F4: asks the AI for the next step. Writes nothing; runs off the UI thread.
+#[tauri::command]
+async fn propose_next(
+    store: State<'_, AppStore>,
+    ai: State<'_, Ai>,
+    goal: NodeId,
+    remote: bool,
+) -> Result<Proposal, String> {
+    let not_configured = || symbiot_ai::Error::NotConfigured.to_string();
+    let advisor = ai.0.clone().ok_or_else(not_configured)?;
+    let (nodes, edges, sensitive) =
+        store.with(|s| Ok((s.nodes(None)?, s.edges()?, s.sensitive_nodes()?)))?;
+    let ctx =
+        symbiot_ai::context(goal, &nodes, &edges, &sensitive, remote).map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || advisor.propose(&ctx))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+#[derive(serde::Serialize)]
+struct Accepted {
+    node: Node,
+    edge: Edge,
+}
+
+#[tauri::command]
+fn accept_proposal(store: State<AppStore>, proposal: Proposal) -> Result<Accepted, String> {
+    store
+        .with(|s| s.accept_proposal(proposal))
+        .map(|(node, edge)| Accepted { node, edge })
+}
+
+#[tauri::command]
+fn reject_proposal(store: State<AppStore>, proposal: Proposal) -> Result<(), String> {
+    store.with(|s| s.reject_proposal(proposal))
+}
+
+#[tauri::command]
+fn list_sensitive(store: State<AppStore>) -> Result<Vec<NodeId>, String> {
+    store.with(|s| s.sensitive_nodes())
+}
+
+#[tauri::command]
+fn set_sensitive(store: State<AppStore>, id: NodeId, sensitive: bool) -> Result<(), String> {
+    store.with(|s| s.set_sensitive(id, sensitive))
+}
+
 #[tauri::command]
 fn verify_ledger(store: State<AppStore>) -> Result<VerifyReport, String> {
     store.with(|s| s.verify())
@@ -73,6 +130,9 @@ pub fn run() {
             let dir = app.path().app_data_dir()?;
             let store = Store::open_dir(&dir)?;
             app.manage(AppStore(Mutex::new(store)));
+            let ai = symbiot_ai::Config::from_env()
+                .map(|c| Arc::new(symbiot_ai::LiteLlm::new(c)) as Arc<dyn Advisor>);
+            app.manage(Ai(ai));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -82,7 +142,13 @@ pub fn run() {
             node_history,
             list_edges,
             link_nodes,
-            verify_ledger
+            verify_ledger,
+            ai_info,
+            propose_next,
+            accept_proposal,
+            reject_proposal,
+            list_sensitive,
+            set_sensitive
         ])
         .run(tauri::generate_context!())
         .expect("error while running Symbiot");
