@@ -7,11 +7,11 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post, put};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use symbiot_ai::Advisor;
-use symbiot_core::{Edge, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Proposal};
+use symbiot_core::{Edge, EdgeId, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal};
 use symbiot_store::{Store, VerifyReport};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
@@ -37,8 +37,12 @@ type Shared = Arc<AppState>;
 pub fn app(store: Store, ui_dir: Option<PathBuf>, ai: Option<Arc<dyn Advisor>>) -> Router {
     let api = Router::new()
         .route("/nodes", get(list_nodes).post(create_node))
-        .route("/nodes/{id}", get(get_node).put(update_node))
+        .route(
+            "/nodes/{id}",
+            get(get_node).put(update_node).delete(delete_node),
+        )
         .route("/nodes/{id}/history", get(history))
+        .route("/nodes/{id}/policy", get(get_policy).put(set_policy))
         .route("/nodes/{id}/sensitive", put(set_sensitive))
         .route("/nodes/{id}/propose", post(propose))
         .route("/sensitive", get(list_sensitive))
@@ -46,6 +50,7 @@ pub fn app(store: Store, ui_dir: Option<PathBuf>, ai: Option<Arc<dyn Advisor>>) 
         .route("/proposals/reject", post(reject_proposal))
         .route("/ai", get(ai_info))
         .route("/edges", get(list_edges).post(create_edge))
+        .route("/edges/{id}", delete(unlink))
         .route("/ledger", get(ledger))
         .route("/ledger/verify", get(verify));
 
@@ -89,6 +94,9 @@ pub struct NewNode {
     pub title: String,
     #[serde(default)]
     pub body: String,
+    /// E3: `deletable` and `exportable`, both true when left out.
+    #[serde(flatten)]
+    pub policy: Policy,
 }
 
 #[derive(Deserialize)]
@@ -113,7 +121,7 @@ async fn create_node(
     State(s): State<Shared>,
     Json(n): Json<NewNode>,
 ) -> Result<(StatusCode, Json<Node>), ApiError> {
-    let node = lock(&s).create_node(n.kind, &n.title, &n.body)?;
+    let node = lock(&s).create_node_with(n.kind, &n.title, &n.body, n.policy)?;
     tracing::info!(id = %node.id, kind = node.kind.as_str(), "node created");
     Ok((StatusCode::CREATED, Json(node)))
 }
@@ -136,6 +144,41 @@ async fn update_node(
     Ok(Json(node))
 }
 
+#[derive(Serialize)]
+pub struct Deleted {
+    /// Entries whose content was removed (0 if the node is not deletable).
+    pub pruned: usize,
+}
+
+/// E2: deletion marker; a deletable node also loses its content on this device.
+async fn delete_node(
+    State(s): State<Shared>,
+    Path(id): Path<String>,
+) -> Result<Json<Deleted>, ApiError> {
+    let id = parse_id(&id)?;
+    let pruned = lock(&s).delete_node(id)?;
+    tracing::info!(%id, pruned, "node deleted");
+    Ok(Json(Deleted { pruned }))
+}
+
+async fn get_policy(
+    State(s): State<Shared>,
+    Path(id): Path<String>,
+) -> Result<Json<Policy>, ApiError> {
+    Ok(Json(lock(&s).policy(parse_id(&id)?)?))
+}
+
+async fn set_policy(
+    State(s): State<Shared>,
+    Path(id): Path<String>,
+    Json(p): Json<Policy>,
+) -> Result<StatusCode, ApiError> {
+    let id = parse_id(&id)?;
+    lock(&s).set_policy(id, p)?;
+    tracing::info!(%id, deletable = p.deletable, exportable = p.exportable, "policy set");
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn history(
     State(s): State<Shared>,
     Path(id): Path<String>,
@@ -152,6 +195,13 @@ pub struct NewEdge {
 
 async fn list_edges(State(s): State<Shared>) -> Result<Json<Vec<Edge>>, ApiError> {
     Ok(Json(lock(&s).edges()?))
+}
+
+async fn unlink(State(s): State<Shared>, Path(id): Path<String>) -> Result<StatusCode, ApiError> {
+    let id = EdgeId::from_hex(&id).ok_or(ApiError::bad("ungültige Verbindungs-ID"))?;
+    lock(&s).unlink(id)?;
+    tracing::info!(%id, "edge removed");
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn create_edge(
@@ -205,9 +255,9 @@ async fn propose(
     let ai = s.ai.clone().ok_or(symbiot_ai::Error::NotConfigured)?;
     let ctx = {
         let store = lock(&s);
-        let (nodes, edges, sensitive) =
-            (store.nodes(None)?, store.edges()?, store.sensitive_nodes()?);
-        symbiot_ai::context(goal, &nodes, &edges, &sensitive, r.remote)?
+        let (nodes, edges, home_only) =
+            (store.nodes(None)?, store.edges()?, store.home_only_nodes()?);
+        symbiot_ai::context(goal, &nodes, &edges, &home_only, r.remote)?
     };
     let withheld = ctx.withheld;
     let proposal = tokio::task::spawn_blocking(move || ai.propose(&ctx))
@@ -277,7 +327,7 @@ impl From<symbiot_store::Error> for ApiError {
         use symbiot_store::Error::*;
         match e {
             Invalid(_) => ApiError(StatusCode::BAD_REQUEST, e.to_string()),
-            UnknownNode(_) => ApiError(StatusCode::NOT_FOUND, e.to_string()),
+            UnknownNode(_) | UnknownEdge(_) => ApiError(StatusCode::NOT_FOUND, e.to_string()),
             Sqlite(_) | Encoding(_) => {
                 tracing::error!(error = %e, "store failure");
                 ApiError(StatusCode::INTERNAL_SERVER_ERROR, "interner Fehler".into())

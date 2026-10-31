@@ -17,7 +17,7 @@ Wir geben nur Empfehlungen. Daraus folgt für die Architektur:
 - Die Empfehlung ist Teil der Einrichtung und ist veränderbar, z. B. „Kette auf dem Gerät, Kopie auf dem
   eigenen Server, KI lokal; Claude nur über den Masken-Filter“.
 
-## E2 — Löschen: Löschmarker + Inhalts-Hash · *entschieden*
+## E2 — Löschen: Löschmarker + Inhalts-Hash · *entschieden, umgesetzt (Protokoll 2)*
 
 Löschen heißt: ein neuer, signierter Eintrag `DeleteNode` bzw. `Unlink` (Löschmarker). Die Kette bleibt
 lückenlos prüfbar, die Projektion zeigt den Knoten bzw. die Kante nicht mehr.
@@ -35,7 +35,7 @@ bleibt), und `verify()` bestätigt die Kette trotzdem. Geräte, die eine Kopie h
 auf. Ein fremdes Gerät kann dazu nicht gezwungen werden – das gilt für jede Löschung in einem verteilten
 System und muss in der Oberfläche ehrlich so stehen.
 
-## E3 — „Löschbar“ und „exportierbar“ entscheidet der Mensch, pro Knoten · *entschieden*
+## E3 — „Löschbar“ und „exportierbar“ entscheidet der Mensch, pro Knoten · *entschieden, umgesetzt*
 
 - Bei jedem neuen Knoten lässt sich festlegen, ob er **löschbar** und ob er **exportierbar** ist.
   Standard: **beides ja**.
@@ -145,7 +145,7 @@ beim ersten Adapter (Kalender) geprüft. Eigene Repos und Forks legt erst an, we
 - Auch bei vertrautem Text gilt weiter: Die KI schlägt nur vor, der Mensch entscheidet. Vertrauen öffnet also
   den Weg zur KI, nicht den Weg zu Handlungen.
 
-## E13 — Regeln fürs Bündeln · *entschieden (2026-10-31)*
+## E13 — Regeln fürs Bündeln · *entschieden (2026-10-31), Kettenformat umgesetzt*
 
 Sensoren und Adapter erzeugen viele Einträge. Gesucht sind Regeln für Bündeln, Aufbewahren und Checkpoints,
 die die Prüfbarkeit erhalten. Recherche: [RECHERCHE-BUENDELN.md](RECHERCHE-BUENDELN.md).
@@ -161,6 +161,12 @@ Entschieden:
 - **Folge fürs Kettenformat (vor M4):** Kopf und Inhalt trennen, Merkle-Wurzel über die Inhaltsteile mit Salz,
   Protokollversion 2, feste Typ-IDs. Weil Knoten-IDs aus dem Eintrags-Hash entstehen, ändert eine Migration
   bestehender Ketten alle Knoten-IDs.
+
+**Umgesetzt (2026-10-31):** Kopf und Inhalt getrennt, Salz aus dem Geräteschlüssel abgeleitet, Merkle-Root
+nach RFC 9162, Domänentrennung, `PROTOCOL_VERSION = 2`, feste Kennungen in `symbiot_core::kind` (Checkpoint,
+Witness, Bündel, Retention, Grant/Revoke, Geräte reserviert). **Keine Migration:** Die v1-Daten waren Testdaten;
+eine v1-Datenbank wird beim Start als `symbiot.v1.db` beiseitegelegt. Noch offen: Checkpoint und Witness (M4),
+Bündel, `SetRetention`, Rollup und „Aufgeräumt“ (mit dem ersten Adapter).
 
 ## E8 — Zurückgestellt · *entschieden*
 
