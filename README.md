@@ -27,6 +27,7 @@ Hervorgegangen aus dem Ideengarten *TrustInAI*. Benannt nach der *Symbiose Mensc
 | `apps/ui` | Leptos-Oberfläche, im Browser über `/api`, in Tauri über `invoke` |
 | `apps/desktop` | Tauri 2: Windows, macOS, Linux (später Android, iOS), Daten lokal |
 | `apps/server` | axum auf heimserver: API, liefert die UI aus, `/health` |
+| `prototypes/connect` | Prototyp der Idee Connect als 3D-Graph mit Kurzfilm. Eigenständig, Node ohne Abhängigkeiten, nicht im Server-Image. [README](prototypes/connect/README.md) |
 
 ## Entwickeln
 Voraussetzungen und Einrichtung: [docs/TECH-STACK.md](docs/TECH-STACK.md#entwicklungsumgebung-windows-pc).

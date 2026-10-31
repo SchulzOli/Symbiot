@@ -3,3 +3,4 @@ apps/ui/dist
 .git
 data
 **/*.db*
+prototypes
