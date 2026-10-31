@@ -25,6 +25,22 @@ Tag vX.Y.Z ─► Release: Installer für Windows, Linux, macOS als GitHub Relea
 | Gesundheit | Docker-HEALTHCHECK `symbiot-server --health` → Komodo und Beszel sehen `healthy`/`unhealthy` |
 | Logs | JSON nach stdout → Dozzle. Level `ERROR` bei Speicherfehlern und **gebrochener Kette** |
 
+## KI (M3)
+
+Der Server fragt LiteLLM nur, wenn `SYMBIOT_AI_URL` gesetzt ist. Ohne KI läuft alles andere weiter, nur
+„Nächsten Schritt vorschlagen“ meldet „KI ist nicht eingerichtet“.
+
+| Variable | Bedeutung |
+|---|---|
+| `SYMBIOT_AI_URL` | OpenAI-kompatible Basis-URL, auf heimserver `http://127.0.0.1:8085/v1` (LiteLLM) |
+| `SYMBIOT_AI_KEY` | LiteLLM-Schlüssel, **nur** in `/opt/stacks/symbiot/.env`, nie im Repo |
+| `SYMBIOT_AI_MODEL` | Modell im Heimnetz, Standard `qwen3:8b` (Name wie in LiteLLM) |
+| `SYMBIOT_AI_REMOTE_MODEL` | optional: externes Modell hinter dem Masken-Filter. Bekommt nie sensible Knoten |
+| `SYMBIOT_AI_TIMEOUT_S` | Zeitlimit pro Vorschlag, Standard 120 |
+
+Die Desktop-App liest dieselben Variablen beim Start. Ins Log schreibt der Server nur Metadaten (Modell,
+Anzahl Quellen, zurückgehaltene sensible Knoten), nie den Inhalt eines Vorschlags.
+
 ## Einmalig einrichten (von Hand, braucht deine Anmeldungen)
 
 0. **Stack anlegen:** [deploy/install.sh](../deploy/install.sh) mit `compose.yaml` nach heimserver kopieren und mit sudo starten.

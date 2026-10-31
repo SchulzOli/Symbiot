@@ -167,3 +167,16 @@ button.link {
 marker path { stroke: none; }
 .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.8rem; margin: 6px 0 0; }
 .legend span { stroke: none; fill: none; }
+
+/* F4 — Nächster Schritt, Vorschlag der KI */
+.next-step { display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; }
+.proposal {
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+  border: 1px dashed currentColor;
+  border-radius: 10px;
+}
+.proposal h5 { margin: 0 0 0.25rem; font-size: 1rem; }
+.proposal .sources { margin: 0.25rem 0 0.5rem; padding-left: 1.2rem; }
+.sensitive { gap: 0.4rem; margin: 0.5rem 0; }
+.lock { margin-left: 0.4rem; }

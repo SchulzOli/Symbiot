@@ -2,7 +2,7 @@
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use symbiot_core::{Edge, EdgeKind, Node, NodeId, Op};
+use symbiot_core::{Edge, EdgeKind, Node, NodeId, NodeKind, Op, Proposal};
 
 use crate::{api, format_ms, short};
 
@@ -11,6 +11,7 @@ pub fn Detail(
     node: Node,
     nodes: Vec<Node>,
     edges: Vec<Edge>,
+    sensitive: bool,
     selected: RwSignal<Option<NodeId>>,
     on_saved: impl Fn() + Copy + Send + Sync + 'static,
     refresh: RwSignal<u32>,
@@ -66,6 +67,8 @@ pub fn Detail(
                 <button class="chip" on:click=move |_| selected.set(None)>"Schließen"</button>
             </div>
             <Edit node=node.clone() on_saved />
+            <Sensitive id sensitive on_saved />
+            {(node.kind == NodeKind::Goal).then(|| view! { <NextStep id nodes=nodes.clone() selected on_saved /> })}
             <h4>"Verbindungen"</h4>
             <ul class="connections">{connections}</ul>
             <Connect id targets on_saved />
@@ -102,6 +105,142 @@ fn Edit(node: Node, on_saved: impl Fn() + Copy + Send + Sync + 'static) -> impl 
                 <button type="submit">"Neue Version speichern"</button>
             </div>
         </form>
+    }
+}
+
+/// E4: mark by hand, any time — a sensitive node never leaves the home network.
+#[component]
+fn Sensitive(
+    id: NodeId,
+    sensitive: bool,
+    on_saved: impl Fn() + Copy + Send + Sync + 'static,
+) -> impl IntoView {
+    let error = RwSignal::new(None::<String>);
+    let toggle = move |ev: leptos::ev::Event| {
+        let on = event_target_checked(&ev);
+        spawn_local(async move {
+            match api::set_sensitive(id, on).await {
+                Ok(()) => {
+                    error.set(None);
+                    on_saved();
+                }
+                Err(e) => error.set(Some(e)),
+            }
+        });
+    };
+    view! {
+        <label class="sensitive row">
+            <input type="checkbox" prop:checked=sensitive on:change=toggle />
+            "🔒 Sensibel – verlässt nie das Heimnetz"
+            {move || error.get().map(|e| view! { <span class="error">{e}</span> })}
+        </label>
+    }
+}
+
+/// F4: the AI suggests the next step, the human accepts or rejects it.
+/// Until then the proposal lives only here, nothing is written.
+#[component]
+fn NextStep(
+    id: NodeId,
+    nodes: Vec<Node>,
+    selected: RwSignal<Option<NodeId>>,
+    on_saved: impl Fn() + Copy + Send + Sync + 'static,
+) -> impl IntoView {
+    let info = LocalResource::new(api::ai_info);
+    let proposal = RwSignal::new(None::<Proposal>);
+    let busy = RwSignal::new(false);
+    let remote = RwSignal::new(false);
+    let error = RwSignal::new(None::<String>);
+
+    let ask = move |_| {
+        busy.set(true);
+        error.set(None);
+        proposal.set(None);
+        spawn_local(async move {
+            match api::propose(id, remote.get_untracked()).await {
+                Ok(p) => proposal.set(Some(p)),
+                Err(e) => error.set(Some(e)),
+            }
+            busy.set(false);
+        });
+    };
+    let decide = move |accept: bool| {
+        let Some(p) = proposal.get_untracked() else {
+            return;
+        };
+        spawn_local(async move {
+            let result = if accept {
+                api::accept_proposal(p)
+                    .await
+                    .map(|a| selected.set(Some(a.node.id)))
+            } else {
+                api::reject_proposal(p).await
+            };
+            match result {
+                Ok(()) => {
+                    proposal.set(None);
+                    on_saved();
+                }
+                Err(e) => error.set(Some(e)),
+            }
+        });
+    };
+
+    let card = move || {
+        proposal.get().map(|p| {
+            let sources = p
+                .sources
+                .iter()
+                .map(|s| {
+                    let s = *s;
+                    let label = nodes
+                        .iter()
+                        .find(|n| n.id == s)
+                        .map(|n| format!("{}: {}", n.kind.label(), n.title))
+                        .unwrap_or_else(|| short(&s.to_hex()));
+                    view! { <li><button class="link" on:click=move |_| selected.set(Some(s))>{label}</button></li> }
+                })
+                .collect_view();
+            view! {
+                <div class="proposal" data-testid="proposal">
+                    <h5>{p.title.clone()}</h5>
+                    {(!p.body.is_empty()).then(|| view! { <p>{p.body.clone()}</p> })}
+                    <p class="muted">"Quellen:"</p>
+                    <ul class="sources">{sources}</ul>
+                    <small class="muted">{format!("Modell {} · noch nicht gespeichert", p.model)}</small>
+                    <div class="row end">
+                        <button class="chip" on:click=move |_| decide(false)>"Ablehnen"</button>
+                        <button on:click=move |_| decide(true)>"Annehmen"</button>
+                    </div>
+                </div>
+            }
+        })
+    };
+
+    view! {
+        <h4>"Nächster Schritt"</h4>
+        {move || match info.get() {
+            None => view! { <p class="muted">"Lade …"</p> }.into_any(),
+            Some(Ok(i)) if i.available => {
+                let external = i.remote_model.clone().map(|m| view! {
+                    <label class="row muted">
+                        <input type="checkbox" prop:checked=move || remote.get() on:change=move |ev| remote.set(event_target_checked(&ev)) />
+                        {format!("Externes Modell ({m}) – sensible Knoten bleiben zu Hause")}
+                    </label>
+                });
+                view! {
+                    <div class="next-step">
+                        {external}
+                        <button on:click=ask disabled=move || busy.get()>
+                            {move || if busy.get() { "Denke nach …" } else { "Nächsten Schritt vorschlagen" }}
+                        </button>
+                    </div>
+                }.into_any()
+            }
+            Some(_) => view! { <p class="muted">"KI ist nicht eingerichtet."</p> }.into_any(),
+        }}
+        {move || error.get().map(|e| view! { <p class="error">{e}</p> })}
+        {card}
     }
 }
 
@@ -182,7 +321,10 @@ fn History(id: NodeId, refresh: RwSignal<u32>) -> impl IntoView {
                             Op::CreateNode { title, .. } | Op::UpdateNode { title, .. } => {
                                 title.clone()
                             }
-                            Op::Link { .. } => String::new(),
+                            Op::AcceptProposal { proposal } => {
+                                format!("{} (KI-Vorschlag von {}, angenommen)", proposal.title, proposal.model)
+                            }
+                            _ => String::new(),
                         };
                         view! {
                             <li title=e.hash.to_hex()>
