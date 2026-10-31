@@ -1,26 +1,35 @@
 //! The append-only, signed hash chain. One chain per device, one writer per chain.
 //!
-//! `hash = sha256(postcard(protocol, author, seq, prev, ts_ms, op))`, `sig = ed25519(hash)`.
-//! Changing any byte, reordering, or dropping an entry breaks verification.
+//! An entry is a signed **head** plus removable **content** (E2, E13):
+//! `hash = sha256("symbiot/entry/v2" ‖ postcard(protocol, head))`, `sig = ed25519(hash)`.
+//! The head carries the Merkle root over the content parts, so content can be removed
+//! later and the chain still verifies. Changing any byte of the head, reordering, or
+//! dropping an entry breaks verification; changed content no longer matches its root.
 
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
 use ed25519_dalek::{Signature, Signer as _, SigningKey, VerifyingKey};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::PROTOCOL_VERSION;
-use crate::bytes::{Hash, NodeId, PubKey, Sig};
+use crate::bytes::{Blob, Hash, NodeId, PubKey, Salt, Sig};
 use crate::edge::EdgeKind;
+use crate::kind;
+use crate::merkle;
 use crate::node::NodeKind;
 use crate::proposal::Proposal;
 
-/// What an entry does. Editing never overwrites — it appends an `UpdateNode`.
-/// Externally tagged (serde default): postcard cannot read internally tagged enums.
-/// postcard encodes the variant index, so new variants go at the END — reordering
-/// would change the hashes of existing chains.
+/// Domain separation: an entry hash can never be mistaken for a leaf, tree or checkpoint hash.
+const ENTRY_DOMAIN: &[u8] = b"symbiot/entry/v2";
+const SALT_DOMAIN: &[u8] = b"symbiot/salt/v2";
+
+/// What an entry does — the language of the apps. Editing never overwrites, it appends an
+/// `UpdateNode`. In the chain an op is split by [`Op::encode`] into a fixed kind id
+/// ([`crate::kind`]), head params and removable content (title and body).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Op {
@@ -48,33 +57,208 @@ pub enum Op {
     MarkSensitive { node: NodeId, sensitive: bool },
 }
 
+fn enc<T: Serialize + ?Sized>(v: &T) -> Vec<u8> {
+    postcard::to_allocvec(v).expect("postcard serialization into a Vec cannot fail")
+}
+
+fn dec<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, Decode> {
+    postcard::from_bytes(bytes).map_err(|_| Decode::Malformed)
+}
+
+impl Op {
+    /// Splits the op into its kind id, the head params and the removable content.
+    /// Only title and body are content; ids, kinds, sources and the model stay in the head.
+    pub fn encode(&self) -> (u16, Vec<u8>, Option<Vec<u8>>) {
+        match self {
+            Op::CreateNode {
+                kind: k,
+                title,
+                body,
+            } => (kind::CREATE_NODE, enc(k), Some(enc(&(title, body)))),
+            Op::UpdateNode { node, title, body } => {
+                (kind::UPDATE_NODE, enc(node), Some(enc(&(title, body))))
+            }
+            Op::Link { from, to, kind: k } => (kind::LINK, enc(&(from, to, k)), None),
+            Op::AcceptProposal { proposal: p } => (
+                kind::ACCEPT_PROPOSAL,
+                enc(&(p.goal, &p.sources, p.kind, &p.model)),
+                Some(enc(&(&p.title, &p.body))),
+            ),
+            Op::RejectProposal { proposal: p } => (
+                kind::REJECT_PROPOSAL,
+                enc(&(p.goal, &p.sources, p.kind, &p.model)),
+                Some(enc(&(&p.title, &p.body))),
+            ),
+            Op::MarkSensitive { node, sensitive } => {
+                (kind::MARK_SENSITIVE, enc(&(node, sensitive)), None)
+            }
+        }
+    }
+}
+
+/// Why an entry cannot be read as an [`Op`]. It may still be validly signed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Decode {
+    /// A kind this version does not know — written by a newer app.
+    Unknown(u16),
+    /// Params or content do not fit the kind.
+    Malformed,
+}
+
+impl fmt::Display for Decode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Decode::Unknown(k) => write!(f, "unbekannte Eintragsart {k}"),
+            Decode::Malformed => f.write_str("Eintrag passt nicht zu seiner Art"),
+        }
+    }
+}
+
+/// The signed part of an entry. Never removed.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LedgerEntry {
+pub struct Head {
     pub author: PubKey,
     pub seq: u64,
     pub prev: Hash,
     pub ts_ms: u64,
-    pub op: Op,
+    /// Fixed id from [`crate::kind`].
+    pub kind: u16,
+    /// postcard bytes of the kind's head fields.
+    pub params: Blob,
+    /// Commitment to the content, `None` for entries without content.
+    pub content: Option<ContentRef>,
+}
+
+impl Head {
+    pub fn hash(&self) -> Result<Hash, postcard::Error> {
+        let bytes = postcard::to_allocvec(&(PROTOCOL_VERSION, self))?;
+        let mut h = Sha256::new();
+        h.update(ENTRY_DOMAIN);
+        h.update(&bytes);
+        Ok(Hash(h.finalize().into()))
+    }
+}
+
+/// What the head commits to: Merkle root over the parts, their number and total length.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContentRef {
+    pub root: Hash,
+    pub parts: u32,
+    pub len: u32,
+}
+
+impl ContentRef {
+    pub fn of(parts: &[Part]) -> Self {
+        let leaves: Vec<Hash> = parts
+            .iter()
+            .map(|p| merkle::leaf(&p.salt, &p.data.0))
+            .collect();
+        ContentRef {
+            root: merkle::root(&leaves),
+            parts: parts.len() as u32,
+            len: parts.iter().map(|p| p.data.0.len() as u32).sum(),
+        }
+    }
+}
+
+/// One removable piece of content. The salt goes with it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Part {
+    pub salt: Salt,
+    pub data: Blob,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LedgerEntry {
+    pub head: Head,
+    /// `None` once removed (or never had any) — the entry stays valid.
+    pub content: Option<Vec<Part>>,
     pub hash: Hash,
     pub sig: Sig,
 }
 
 impl LedgerEntry {
-    /// Recomputes the hash from the signed content (ignores the stored `hash`).
-    pub fn content_hash(&self) -> Result<Hash, postcard::Error> {
-        content_hash(&self.author, self.seq, &self.prev, self.ts_ms, &self.op)
+    /// Recomputes the hash from the signed head (ignores the stored `hash`).
+    pub fn head_hash(&self) -> Result<Hash, postcard::Error> {
+        self.head.hash()
     }
-}
 
-fn content_hash(
-    author: &PubKey,
-    seq: u64,
-    prev: &Hash,
-    ts_ms: u64,
-    op: &Op,
-) -> Result<Hash, postcard::Error> {
-    let bytes = postcard::to_allocvec(&(PROTOCOL_VERSION, author, seq, prev, ts_ms, op))?;
-    Ok(Hash(Sha256::digest(&bytes).into()))
+    /// True when content is missing although the head commits to some.
+    pub fn is_pruned(&self) -> bool {
+        self.head.content.is_some() && self.content.is_none()
+    }
+
+    /// Content that is present must match the root in the head. Missing content is fine.
+    pub fn content_matches(&self) -> bool {
+        match (&self.head.content, &self.content) {
+            (_, None) => true,
+            (Some(r), Some(parts)) => ContentRef::of(parts) == *r,
+            (None, Some(_)) => false,
+        }
+    }
+
+    /// Reads the entry as an [`Op`]. Removed content reads as empty title and body —
+    /// check [`LedgerEntry::is_pruned`] to tell the two apart.
+    pub fn op(&self) -> Result<Op, Decode> {
+        let p = &self.head.params.0[..];
+        Ok(match self.head.kind {
+            kind::CREATE_NODE => {
+                let (title, body) = self.text()?;
+                Op::CreateNode {
+                    kind: dec(p)?,
+                    title,
+                    body,
+                }
+            }
+            kind::UPDATE_NODE => {
+                let (title, body) = self.text()?;
+                Op::UpdateNode {
+                    node: dec(p)?,
+                    title,
+                    body,
+                }
+            }
+            kind::LINK => {
+                let (from, to, kind) = dec(p)?;
+                Op::Link { from, to, kind }
+            }
+            kind::ACCEPT_PROPOSAL => Op::AcceptProposal {
+                proposal: self.proposal()?,
+            },
+            kind::REJECT_PROPOSAL => Op::RejectProposal {
+                proposal: self.proposal()?,
+            },
+            kind::MARK_SENSITIVE => {
+                let (node, sensitive) = dec(p)?;
+                Op::MarkSensitive { node, sensitive }
+            }
+            other => return Err(Decode::Unknown(other)),
+        })
+    }
+
+    fn text(&self) -> Result<(String, String), Decode> {
+        if self.head.content.is_none() {
+            return Err(Decode::Malformed);
+        }
+        match self.content.as_deref() {
+            None => Ok((String::new(), String::new())),
+            Some([part]) => dec(&part.data.0),
+            Some(_) => Err(Decode::Malformed),
+        }
+    }
+
+    fn proposal(&self) -> Result<Proposal, Decode> {
+        let (goal, sources, kind, model) = dec(&self.head.params.0)?;
+        let (title, body) = self.text()?;
+        Ok(Proposal {
+            goal,
+            kind,
+            title,
+            body,
+            sources,
+            model,
+        })
+    }
 }
 
 /// A device's signing identity. The seed comes from the platform's RNG and is
@@ -96,26 +280,70 @@ impl Signer {
 
     /// Appends `op` after `prev` (the current tip of this device's chain, `None` for the first entry).
     pub fn append(&self, prev: Option<&LedgerEntry>, ts_ms: u64, op: Op) -> LedgerEntry {
+        let (kind, params, content) = op.encode();
+        self.sign(prev, ts_ms, kind, params, content.into_iter().collect())
+    }
+
+    /// Signs an entry of any kind with the given content parts (none → no content).
+    fn sign(
+        &self,
+        prev: Option<&LedgerEntry>,
+        ts_ms: u64,
+        kind: u16,
+        params: Vec<u8>,
+        parts: Vec<Vec<u8>>,
+    ) -> LedgerEntry {
         let author = self.public();
         let (seq, prev_hash) = match prev {
             Some(p) => {
-                debug_assert_eq!(p.author, author, "a chain has exactly one writer");
-                (p.seq + 1, p.hash)
+                debug_assert_eq!(p.head.author, author, "a chain has exactly one writer");
+                (p.head.seq + 1, p.hash)
             }
             None => (0, Hash::ZERO),
         };
-        let hash = content_hash(&author, seq, &prev_hash, ts_ms, &op)
-            .expect("postcard serialization into a Vec cannot fail");
-        let sig = Sig(self.key.sign(&hash.0).to_bytes());
-        LedgerEntry {
+        let content: Option<Vec<Part>> = (!parts.is_empty()).then(|| {
+            parts
+                .into_iter()
+                .enumerate()
+                .map(|(i, data)| Part {
+                    salt: self.salt(seq, i as u32),
+                    data: Blob(data),
+                })
+                .collect()
+        });
+        let head = Head {
             author,
             seq,
             prev: prev_hash,
             ts_ms,
-            op,
+            kind,
+            params: Blob(params),
+            content: content.as_deref().map(ContentRef::of),
+        };
+        let hash = head
+            .hash()
+            .expect("postcard serialization into a Vec cannot fail");
+        let sig = Sig(self.key.sign(&hash.0).to_bytes());
+        LedgerEntry {
+            head,
+            content,
             hash,
             sig,
         }
+    }
+
+    /// Derived from the device secret, so no RNG is needed (same on a microcontroller).
+    /// Unguessable for anyone without the key — and whoever has it can sign anyway.
+    fn salt(&self, seq: u64, part: u32) -> Salt {
+        let mut h = Sha256::new();
+        h.update(SALT_DOMAIN);
+        h.update(self.key.to_bytes());
+        h.update(seq.to_le_bytes());
+        h.update(part.to_le_bytes());
+        let digest: [u8; 32] = h.finalize().into();
+        let mut salt = [0u8; 16];
+        salt.copy_from_slice(&digest[..16]);
+        Salt(salt)
     }
 }
 
@@ -126,12 +354,14 @@ pub enum VerifyError {
     WrongSeq { expected: u64, found: u64 },
     /// `prev` does not point to the previous entry's hash.
     BrokenLink { seq: u64 },
-    /// Content was changed after signing.
+    /// The head was changed after signing.
     BadHash { seq: u64 },
     /// Signature does not match the author's key.
     BadSignature { seq: u64 },
     /// A different device wrote into this chain.
     ForeignAuthor { seq: u64 },
+    /// Content is present but does not match what the head committed to.
+    BadContent { seq: u64 },
 }
 
 impl fmt::Display for VerifyError {
@@ -145,46 +375,54 @@ impl fmt::Display for VerifyError {
                 write!(f, "Eintrag {seq}: Verweis auf den Vorgänger stimmt nicht")
             }
             VerifyError::BadHash { seq } => {
-                write!(f, "Eintrag {seq}: Inhalt wurde nachträglich verändert")
+                write!(f, "Eintrag {seq}: Kopf wurde nachträglich verändert")
             }
             VerifyError::BadSignature { seq } => write!(f, "Eintrag {seq}: Signatur ungültig"),
             VerifyError::ForeignAuthor { seq } => {
                 write!(f, "Eintrag {seq}: stammt von einem anderen Gerät")
+            }
+            VerifyError::BadContent { seq } => {
+                write!(f, "Eintrag {seq}: Inhalt wurde nachträglich verändert")
             }
         }
     }
 }
 
 /// Verifies one device's chain from its first entry. Returns the number of entries.
+/// Entries whose content was removed stay valid.
 pub fn verify_chain(entries: &[LedgerEntry]) -> Result<usize, VerifyError> {
     let Some(first) = entries.first() else {
         return Ok(0);
     };
-    let author = first.author;
+    let author = first.head.author;
     let key =
         VerifyingKey::from_bytes(&author.0).map_err(|_| VerifyError::BadSignature { seq: 0 })?;
 
     let mut prev = Hash::ZERO;
     for (i, e) in entries.iter().enumerate() {
+        let h = &e.head;
         let expected = i as u64;
-        if e.seq != expected {
+        if h.seq != expected {
             return Err(VerifyError::WrongSeq {
                 expected,
-                found: e.seq,
+                found: h.seq,
             });
         }
-        if e.author != author {
-            return Err(VerifyError::ForeignAuthor { seq: e.seq });
+        if h.author != author {
+            return Err(VerifyError::ForeignAuthor { seq: h.seq });
         }
-        if e.prev != prev {
-            return Err(VerifyError::BrokenLink { seq: e.seq });
+        if h.prev != prev {
+            return Err(VerifyError::BrokenLink { seq: h.seq });
         }
-        if e.content_hash().ok() != Some(e.hash) {
-            return Err(VerifyError::BadHash { seq: e.seq });
+        if e.head_hash().ok() != Some(e.hash) {
+            return Err(VerifyError::BadHash { seq: h.seq });
         }
         let sig = Signature::from_bytes(&e.sig.0);
         if key.verify_strict(&e.hash.0, &sig).is_err() {
-            return Err(VerifyError::BadSignature { seq: e.seq });
+            return Err(VerifyError::BadSignature { seq: h.seq });
+        }
+        if !e.content_matches() {
+            return Err(VerifyError::BadContent { seq: h.seq });
         }
         prev = e.hash;
     }
@@ -196,6 +434,8 @@ pub fn verify_chain(entries: &[LedgerEntry]) -> Result<usize, VerifyError> {
 pub struct VerifyReport {
     pub ok: bool,
     pub entries: usize,
+    /// Entries whose content was removed (E2) — still verified by head and signature.
+    pub pruned: usize,
     pub device: PubKey,
     pub tip: Option<Hash>,
     pub error: Option<String>,
@@ -207,6 +447,7 @@ impl VerifyReport {
         VerifyReport {
             ok: result.is_ok(),
             entries: entries.len(),
+            pruned: entries.iter().filter(|e| e.is_pruned()).count(),
             device,
             tip: entries.last().map(|e| e.hash),
             error: result.err().map(|e| alloc::string::ToString::to_string(&e)),
@@ -262,13 +503,94 @@ mod tests {
     fn hashes_are_stable_across_platforms() {
         // Pinned: if this changes, devices can no longer verify each other's chains.
         let e = signer().append(None, 1_000, create("Ziel 0"));
-        assert_eq!(e.seq, 0);
-        assert_eq!(e.prev, Hash::ZERO);
-        assert_eq!(e.content_hash().unwrap(), e.hash);
+        assert_eq!(e.head.seq, 0);
+        assert_eq!(e.head.prev, Hash::ZERO);
+        assert_eq!(e.head.kind, kind::CREATE_NODE);
+        assert_eq!(e.head_hash().unwrap(), e.hash);
         assert_eq!(
             e.hash.to_hex(),
-            "77cf04ae9349400104de686c71cbdb4978e811c4466b494b3a5de33600d55dbc"
+            "4ea40b02ea11acaaf996158ac2041e2574450dd19887ebc0eea98b54a0e64f6e"
         );
+    }
+
+    #[test]
+    fn every_op_round_trips() {
+        let s = signer();
+        let a = NodeId([1; 16]);
+        let b = NodeId([2; 16]);
+        let proposal = Proposal {
+            goal: a,
+            kind: NodeKind::Goal,
+            title: "Laufschuhe kaufen".into(),
+            body: "Alte sind durch".into(),
+            sources: alloc::vec![a, b],
+            model: "qwen3:8b".into(),
+        };
+        let ops = [
+            create("Ziel"),
+            Op::UpdateNode {
+                node: a,
+                title: "Ziel 2".into(),
+                body: "mehr".into(),
+            },
+            Op::Link {
+                from: b,
+                to: a,
+                kind: EdgeKind::Supports,
+            },
+            Op::AcceptProposal {
+                proposal: proposal.clone(),
+            },
+            Op::RejectProposal { proposal },
+            Op::MarkSensitive {
+                node: a,
+                sensitive: true,
+            },
+        ];
+        let c = build_chain(&s, ops.iter().cloned().map(|op| (1, op)));
+        for (e, op) in c.iter().zip(&ops) {
+            assert_eq!(e.op().as_ref(), Ok(op));
+        }
+        assert_eq!(verify_chain(&c), Ok(ops.len()));
+        // Links and markers carry no content.
+        assert!(c[2].content.is_none() && c[5].content.is_none());
+    }
+
+    #[test]
+    fn removed_content_keeps_the_chain_valid() {
+        let mut c = chain(3);
+        c[1].content = None;
+        assert_eq!(verify_chain(&c), Ok(3));
+        assert!(c[1].is_pruned());
+        // The head still says what kind of entry it was; title and body are gone.
+        assert_eq!(
+            c[1].op(),
+            Ok(Op::CreateNode {
+                kind: NodeKind::Goal,
+                title: String::new(),
+                body: String::new(),
+            })
+        );
+        assert_eq!(VerifyReport::of(signer().public(), &c).pruned, 1);
+    }
+
+    #[test]
+    fn content_is_salted() {
+        // Same text, different entries: the leaves differ, so a removed text cannot be guessed.
+        let c = build_chain(&signer(), [(1, create("ja")), (2, create("ja"))]);
+        assert_ne!(c[0].head.content, c[1].head.content);
+        let other = Signer::from_seed([8; 32]).append(None, 1, create("ja"));
+        assert_ne!(c[0].head.content, other.head.content);
+    }
+
+    #[test]
+    fn unknown_kinds_verify_but_do_not_decode() {
+        let s = signer();
+        let a = s.append(None, 1, create("Ziel"));
+        let future = s.sign(Some(&a), 2, 999, alloc::vec![1, 2, 3], alloc::vec![]);
+        let c = alloc::vec![a, future];
+        assert_eq!(verify_chain(&c), Ok(2));
+        assert_eq!(c[1].op(), Err(Decode::Unknown(999)));
     }
 
     #[test]
@@ -296,7 +618,7 @@ mod tests {
         let mut c = chain(2);
         let other = Signer::from_seed([9; 32]);
         c.push(other.append(None, 2_000, create("fremd")));
-        c[2].seq = 2;
+        c[2].head.seq = 2;
         assert_eq!(verify_chain(&c), Err(VerifyError::ForeignAuthor { seq: 2 }));
     }
 
@@ -306,6 +628,7 @@ mod tests {
         let json = serde_json::to_string(&c).unwrap();
         let back: Vec<LedgerEntry> = serde_json::from_str(&json).unwrap();
         assert_eq!(verify_chain(&back), Ok(3));
+        assert_eq!(back, c);
     }
 
     #[test]
@@ -318,8 +641,11 @@ mod tests {
 
     #[derive(Debug, Clone)]
     enum Tamper {
-        Title(usize, String),
+        Content(usize, String),
         Timestamp(usize, u64),
+        Kind(usize, u16),
+        ParamsBit(usize, usize),
+        RootBit(usize, usize),
         HashBit(usize, usize),
         SigBit(usize, usize),
         Drop(usize),
@@ -330,8 +656,11 @@ mod tests {
     fn tamper() -> impl Strategy<Value = Tamper> {
         let i = 0usize..64;
         prop_oneof![
-            (i.clone(), "[a-z]{1,8}").prop_map(|(i, s)| Tamper::Title(i, s)),
+            (i.clone(), "[a-z]{1,8}").prop_map(|(i, s)| Tamper::Content(i, s)),
             (i.clone(), any::<u64>()).prop_map(|(i, t)| Tamper::Timestamp(i, t)),
+            (i.clone(), any::<u16>()).prop_map(|(i, k)| Tamper::Kind(i, k)),
+            (i.clone(), 0usize..8).prop_map(|(i, b)| Tamper::ParamsBit(i, b)),
+            (i.clone(), 0usize..256).prop_map(|(i, b)| Tamper::RootBit(i, b)),
             (i.clone(), 0usize..256).prop_map(|(i, b)| Tamper::HashBit(i, b)),
             (i.clone(), 0usize..512).prop_map(|(i, b)| Tamper::SigBit(i, b)),
             i.clone().prop_map(Tamper::Drop),
@@ -347,14 +676,24 @@ mod tests {
             let mut c = chain(n);
             let original = c.clone();
             match t {
-                Tamper::Title(i, s) => {
-                    let i = i % n;
-                    if let Op::CreateNode { title, .. } = &mut c[i].op { title.push_str(&s); }
+                Tamper::Content(i, s) => {
+                    let parts = c[i % n].content.as_mut().unwrap();
+                    parts[0].data.0.extend_from_slice(s.as_bytes());
                 }
                 Tamper::Timestamp(i, ts) => {
                     let i = i % n;
-                    prop_assume!(c[i].ts_ms != ts);
-                    c[i].ts_ms = ts;
+                    prop_assume!(c[i].head.ts_ms != ts);
+                    c[i].head.ts_ms = ts;
+                }
+                Tamper::Kind(i, k) => {
+                    let i = i % n;
+                    prop_assume!(c[i].head.kind != k);
+                    c[i].head.kind = k;
+                }
+                Tamper::ParamsBit(i, b) => { c[i % n].head.params.0[0] ^= 1 << b; }
+                Tamper::RootBit(i, b) => {
+                    let r = c[i % n].head.content.as_mut().unwrap();
+                    r.root.0[b / 8] ^= 1 << (b % 8);
                 }
                 Tamper::HashBit(i, b) => { let i = i % n; c[i].hash.0[b / 8] ^= 1 << (b % 8); }
                 Tamper::SigBit(i, b) => { let i = i % n; c[i].sig.0[b / 8] ^= 1 << (b % 8); }

@@ -1,18 +1,22 @@
 //! Symbiot store — SQLite on every platform (desktop, mobile, server).
 //!
 //! The ledger table is the truth; the nodes table is a projection of it,
-//! updated in the same transaction as every append.
+//! updated in the same transaction as every append. Each entry is stored as its
+//! signed head plus content in a separate column, so content can be removed (E2).
 
 use std::collections::HashMap;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use symbiot_core::{
-    ApplyError, Change, Edge, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Op, Proposal, PubKey,
-    Signer,
+    ApplyError, Change, Edge, EdgeKind, Hash, LedgerEntry, Node, NodeId, NodeKind, Op, Proposal,
+    PubKey, Sig, Signer,
 };
+
+/// `PRAGMA user_version` of the current schema. 0 with an `entry` column is the v1 format.
+const SCHEMA_VERSION: i64 = 2;
 
 pub use symbiot_core::VerifyReport;
 
@@ -33,6 +37,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct Store {
     conn: Connection,
     signer: Signer,
+    set_aside: Option<PathBuf>,
 }
 
 /// Reads the device's signing seed, creating it on first start. Back this file up: it is the device identity.
@@ -72,22 +77,54 @@ impl Store {
         Self::open(&dir.join("symbiot.db"), Signer::from_seed(seed))
     }
 
+    /// Opens `db`. A database in the old v1 format holds only test data (no migration, decided
+    /// 2026-10-31): it is renamed to `<name>.v1.db` and a fresh v2 chain starts.
     pub fn open(db: &Path, signer: Signer) -> Result<Self> {
-        Self::init(Connection::open(db)?, signer)
+        let mut conn = Connection::open(db)?;
+        let mut set_aside = None;
+        if is_v1(&conn)? {
+            drop(conn);
+            let old = db.with_extension("v1.db");
+            std::fs::rename(db, &old)
+                .map_err(|_| Error::Invalid("alte Datenbank (v1) nicht beiseitelegbar"))?;
+            for suffix in ["-wal", "-shm"] {
+                let mut side = db.as_os_str().to_owned();
+                side.push(suffix);
+                let _ = std::fs::remove_file(side);
+            }
+            set_aside = Some(old);
+            conn = Connection::open(db)?;
+        }
+        let mut store = Self::init(conn, signer)?;
+        store.set_aside = set_aside;
+        Ok(store)
     }
 
     pub fn open_in_memory(signer: Signer) -> Result<Self> {
         Self::init(Connection::open_in_memory()?, signer)
     }
 
+    /// Where an old v1 database was moved when this store was opened, if it was.
+    pub fn set_aside_v1(&self) -> Option<&Path> {
+        self.set_aside.as_deref()
+    }
+
     fn init(conn: Connection, signer: Signer) -> Result<Self> {
+        let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if version > SCHEMA_VERSION {
+            return Err(Error::Invalid("Datenbank stammt von einer neueren Version"));
+        }
+        // secure_delete: removed content is overwritten, not left in free pages (E2).
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
+             PRAGMA secure_delete = ON;
              CREATE TABLE IF NOT EXISTS ledger (
-                 author BLOB NOT NULL,
-                 seq    INTEGER NOT NULL,
-                 hash   BLOB NOT NULL UNIQUE,
-                 entry  BLOB NOT NULL,
+                 author  BLOB NOT NULL,
+                 seq     INTEGER NOT NULL,
+                 hash    BLOB NOT NULL UNIQUE,
+                 sig     BLOB NOT NULL,
+                 head    BLOB NOT NULL,
+                 content BLOB,
                  PRIMARY KEY (author, seq)
              );
              CREATE TABLE IF NOT EXISTS nodes (
@@ -110,7 +147,12 @@ impl Store {
                  node_id BLOB PRIMARY KEY
              );",
         )?;
-        Ok(Store { conn, signer })
+        conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        Ok(Store {
+            conn,
+            signer,
+            set_aside: None,
+        })
     }
 
     /// This device's identity.
@@ -200,12 +242,13 @@ impl Store {
 
         let tip: Option<LedgerEntry> = tx
             .query_row(
-                "SELECT entry FROM ledger WHERE author = ?1 ORDER BY seq DESC LIMIT 1",
+                "SELECT head, hash, sig, content FROM ledger
+                 WHERE author = ?1 ORDER BY seq DESC LIMIT 1",
                 [author.0.as_slice()],
-                |r| r.get::<_, Vec<u8>>(0),
+                raw_entry,
             )
             .optional()?
-            .map(|b| postcard::from_bytes(&b))
+            .map(decode_entry)
             .transpose()?;
 
         // Load what the core rules need, then let the core decide (same rules on every platform).
@@ -243,16 +286,24 @@ impl Store {
                         Error::Invalid("Ein Vorschlag ohne Quellen wird verworfen")
                     }
                     ApplyError::EmptyTitle => Error::Invalid("Titel darf nicht leer sein"),
+                    ApplyError::Undecodable(_) => Error::Invalid("Eintrag nicht lesbar"),
                 }
             })?;
 
         tx.execute(
-            "INSERT INTO ledger (author, seq, hash, entry) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO ledger (author, seq, hash, sig, head, content)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 author.0.as_slice(),
-                entry.seq as i64,
+                entry.head.seq as i64,
                 entry.hash.0.as_slice(),
-                postcard::to_allocvec(&entry)?
+                entry.sig.0.as_slice(),
+                postcard::to_allocvec(&entry.head)?,
+                entry
+                    .content
+                    .as_ref()
+                    .map(postcard::to_allocvec)
+                    .transpose()?
             ],
         )?;
         match &change {
@@ -300,13 +351,10 @@ impl Store {
         let node = self.node(id)?.ok_or(Error::UnknownNode(id))?;
         let mut stmt = self
             .conn
-            .prepare("SELECT entry FROM ledger WHERE hash = ?1")?;
+            .prepare("SELECT head, hash, sig, content FROM ledger WHERE hash = ?1")?;
         node.history
             .iter()
-            .map(|h| {
-                let bytes: Vec<u8> = stmt.query_row([h.0.as_slice()], |r| r.get(0))?;
-                Ok(postcard::from_bytes(&bytes)?)
-            })
+            .map(|h| decode_entry(stmt.query_row([h.0.as_slice()], raw_entry)?))
             .collect()
     }
 
@@ -321,16 +369,48 @@ impl Store {
 
     /// This device's chain, oldest first.
     pub fn entries(&self) -> Result<Vec<LedgerEntry>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT entry FROM ledger WHERE author = ?1 ORDER BY seq")?;
-        let rows = stmt.query_map([self.device().0.as_slice()], |r| r.get::<_, Vec<u8>>(0))?;
-        rows.map(|b| Ok(postcard::from_bytes(&b?)?)).collect()
+        let mut stmt = self.conn.prepare(
+            "SELECT head, hash, sig, content FROM ledger WHERE author = ?1 ORDER BY seq",
+        )?;
+        let rows = stmt.query_map([self.device().0.as_slice()], raw_entry)?;
+        rows.map(|r| decode_entry(r?)).collect()
     }
 
     pub fn verify(&self) -> Result<VerifyReport> {
         Ok(VerifyReport::of(self.device(), &self.entries()?))
     }
+}
+
+/// A v1 database: no schema version yet, and the whole entry in one `entry` column.
+fn is_v1(conn: &Connection) -> Result<bool> {
+    let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+    let entry_column: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('ledger') WHERE name = 'entry'",
+        [],
+        |r| r.get(0),
+    )?;
+    Ok(version == 0 && entry_column > 0)
+}
+
+/// `head, hash, sig, content` as stored.
+type RawEntry = (Vec<u8>, Vec<u8>, Vec<u8>, Option<Vec<u8>>);
+
+fn raw_entry(r: &rusqlite::Row) -> rusqlite::Result<RawEntry> {
+    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+}
+
+fn decode_entry((head, hash, sig, content): RawEntry) -> Result<LedgerEntry> {
+    Ok(LedgerEntry {
+        head: postcard::from_bytes(&head)?,
+        hash: Hash(
+            hash.try_into()
+                .map_err(|_| Error::Invalid("ungültiger Hash in der Datenbank"))?,
+        ),
+        sig: Sig(sig
+            .try_into()
+            .map_err(|_| Error::Invalid("ungültige Signatur in der Datenbank"))?),
+        content: content.map(|c| postcard::from_bytes(&c)).transpose()?,
+    })
 }
 
 fn write_node(conn: &Connection, node: &Node) -> Result<usize> {
@@ -442,21 +522,70 @@ mod tests {
         s.create_node(NodeKind::Goal, "Laufen", "").unwrap();
         s.create_node(NodeKind::Goal, "Lesen", "").unwrap();
 
-        // Someone edits the stored entry behind the app's back.
-        let mut e = s.entries().unwrap().remove(0);
-        if let Op::CreateNode { title, .. } = &mut e.op {
-            *title = "Nicht laufen".into();
-        }
+        // Someone edits the stored content behind the app's back.
+        let e = s.entries().unwrap().remove(0);
+        let mut parts = e.content.unwrap();
+        parts[0].data.0 = postcard::to_allocvec(&("Nicht laufen", "")).unwrap();
         s.conn
             .execute(
-                "UPDATE ledger SET entry = ?1 WHERE seq = 0",
-                [postcard::to_allocvec(&e).unwrap()],
+                "UPDATE ledger SET content = ?1 WHERE seq = 0",
+                [postcard::to_allocvec(&parts).unwrap()],
             )
             .unwrap();
-
         let r = s.verify().unwrap();
         assert!(!r.ok);
         assert!(r.error.unwrap().contains("Eintrag 0"));
+
+        // Removing content is not tampering: the chain stays valid (E2).
+        s.conn
+            .execute("UPDATE ledger SET content = NULL WHERE seq = 0", [])
+            .unwrap();
+        let r = s.verify().unwrap();
+        assert!(r.ok, "{r:?}");
+        assert_eq!(r.pruned, 1);
+
+        // Changing the signed head is.
+        let mut e = s.entries().unwrap().remove(1);
+        e.head.ts_ms += 1;
+        s.conn
+            .execute(
+                "UPDATE ledger SET head = ?1 WHERE seq = 1",
+                [postcard::to_allocvec(&e.head).unwrap()],
+            )
+            .unwrap();
+        let r = s.verify().unwrap();
+        assert!(!r.ok);
+        assert!(r.error.unwrap().contains("Eintrag 1"));
+    }
+
+    #[test]
+    fn a_v1_database_is_set_aside() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("symbiot.db");
+        {
+            let conn = Connection::open(&db).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE ledger (author BLOB, seq INTEGER, hash BLOB, entry BLOB);
+                 INSERT INTO ledger VALUES (x'00', 0, x'00', x'00');",
+            )
+            .unwrap();
+        }
+        let device = {
+            let first = Store::open_dir(dir.path()).unwrap();
+            assert_eq!(
+                first.set_aside_v1(),
+                Some(dir.path().join("symbiot.v1.db").as_path())
+            );
+            first.device()
+        };
+
+        let mut s = Store::open_dir(dir.path()).unwrap();
+        assert!(s.set_aside_v1().is_none(), "only once");
+        assert!(dir.path().join("symbiot.v1.db").exists());
+        assert_eq!(s.device(), device, "the device keeps its key");
+        assert!(s.entries().unwrap().is_empty());
+        s.create_node(NodeKind::Goal, "Neu", "").unwrap();
+        assert!(s.verify().unwrap().ok);
     }
 
     #[test]
@@ -485,8 +614,10 @@ mod tests {
 
         let h = s.history(goal.id).unwrap();
         assert_eq!(h.len(), 2);
-        assert!(matches!(&h[0].op, Op::CreateNode { title, .. } if title == "Laufen"));
-        assert!(matches!(&h[1].op, Op::UpdateNode { title, .. } if title == "Laufen 3x/Woche"));
+        assert!(matches!(h[0].op(), Ok(Op::CreateNode { title, .. }) if title == "Laufen"));
+        assert!(
+            matches!(h[1].op(), Ok(Op::UpdateNode { title, .. }) if title == "Laufen 3x/Woche")
+        );
 
         let r = s.verify().unwrap();
         assert!(r.ok, "{r:?}");
@@ -519,8 +650,8 @@ mod tests {
         s.reject_proposal(proposal.clone()).unwrap();
         assert_eq!(s.nodes(None).unwrap().len(), 2, "rejecting adds no node");
         assert!(matches!(
-            &s.entries().unwrap()[2].op,
-            Op::RejectProposal { proposal: p } if p.title == "Laufschuhe kaufen"
+            s.entries().unwrap()[2].op(),
+            Ok(Op::RejectProposal { proposal: p }) if p.title == "Laufschuhe kaufen"
         ));
 
         let (node, edge) = s.accept_proposal(proposal).unwrap();
@@ -532,7 +663,9 @@ mod tests {
         assert_eq!(s.edges().unwrap(), vec![edge]);
         // The new node's provenance is the decision entry, which carries the sources.
         let h = s.history(node.id).unwrap();
-        assert!(matches!(&h[0].op, Op::AcceptProposal { proposal: p } if p.sources.len() == 2));
+        assert!(
+            matches!(h[0].op(), Ok(Op::AcceptProposal { proposal: p }) if p.sources.len() == 2)
+        );
 
         let r = s.verify().unwrap();
         assert!(r.ok, "{r:?}");
