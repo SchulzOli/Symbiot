@@ -4,8 +4,8 @@
 //! and turns the reply into a [`Proposal`]. Nothing here writes: a proposal only
 //! changes data once the human accepts it (see `Store::accept_proposal`).
 //!
-//! Sensitive nodes (E4) never leave the home network: for an external model they are
-//! left out of the context, and a sensitive goal cannot be sent at all.
+//! Sensitive nodes (E4) and nodes that are not exportable (E3) never reach an external
+//! model: they are left out of the context, and such a goal cannot be sent at all.
 
 use std::time::Duration;
 
@@ -27,7 +27,7 @@ pub enum Error {
     NoRemote,
     #[error("Ziel {0} existiert nicht")]
     UnknownGoal(NodeId),
-    #[error("Das Ziel ist sensibel und verlässt das Heimnetz nicht")]
+    #[error("Das Ziel ist sensibel oder nicht exportierbar und bleibt bei dir")]
     SensitiveGoal,
     #[error("KI nicht erreichbar: {0}")]
     Http(String),
@@ -103,16 +103,17 @@ impl Context {
 
 /// Picks what the AI may see: the goal, its direct connections first, then the newest
 /// other nodes. `nodes` is expected newest first, as the store returns them.
+/// `home_only` are the nodes that must not reach an external model (sensitive or not exportable).
 pub fn context(
     goal: NodeId,
     nodes: &[Node],
     edges: &[Edge],
-    sensitive: &[NodeId],
+    home_only: &[NodeId],
     remote: bool,
 ) -> Result<Context, Error> {
     let find = |id: &NodeId| nodes.iter().find(|n| n.id == *id);
     let goal_node = find(&goal).ok_or(Error::UnknownGoal(goal))?.clone();
-    if remote && sensitive.contains(&goal) {
+    if remote && home_only.contains(&goal) {
         return Err(Error::SensitiveGoal);
     }
 
@@ -134,7 +135,7 @@ pub fn context(
             continue;
         }
         let Some(node) = find(&id) else { continue };
-        if remote && sensitive.contains(&id) {
+        if remote && home_only.contains(&id) {
             withheld += 1;
             continue;
         }

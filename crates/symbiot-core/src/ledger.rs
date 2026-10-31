@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::PROTOCOL_VERSION;
-use crate::bytes::{Blob, Hash, NodeId, PubKey, Salt, Sig};
+use crate::bytes::{Blob, EdgeId, Hash, NodeId, PubKey, Salt, Sig};
 use crate::edge::EdgeKind;
 use crate::kind;
 use crate::merkle;
@@ -55,6 +55,18 @@ pub enum Op {
     /// Marks a node as sensitive (or not): sensitive nodes never leave the home network.
     /// A separate entry, not a node field, so nodes keep the same shape everywhere.
     MarkSensitive { node: NodeId, sensitive: bool },
+    /// Deletion marker (E2). The node disappears; if it is deletable (E3), devices also
+    /// remove the content of every entry that shaped it.
+    DeleteNode { node: NodeId },
+    /// Removes a connection. The `Link` entry stays, it has no content.
+    Unlink { edge: EdgeId },
+    /// Whether a node is deletable and exportable (E3). Can be tightened and loosened later;
+    /// every change is a new entry.
+    SetPolicy {
+        node: NodeId,
+        deletable: bool,
+        exportable: bool,
+    },
 }
 
 fn enc<T: Serialize + ?Sized>(v: &T) -> Vec<u8> {
@@ -92,6 +104,13 @@ impl Op {
             Op::MarkSensitive { node, sensitive } => {
                 (kind::MARK_SENSITIVE, enc(&(node, sensitive)), None)
             }
+            Op::DeleteNode { node } => (kind::DELETE_NODE, enc(node), None),
+            Op::Unlink { edge } => (kind::UNLINK, enc(edge), None),
+            Op::SetPolicy {
+                node,
+                deletable,
+                exportable,
+            } => (kind::SET_POLICY, enc(&(node, deletable, exportable)), None),
         }
     }
 }
@@ -231,6 +250,16 @@ impl LedgerEntry {
             kind::MARK_SENSITIVE => {
                 let (node, sensitive) = dec(p)?;
                 Op::MarkSensitive { node, sensitive }
+            }
+            kind::DELETE_NODE => Op::DeleteNode { node: dec(p)? },
+            kind::UNLINK => Op::Unlink { edge: dec(p)? },
+            kind::SET_POLICY => {
+                let (node, deletable, exportable) = dec(p)?;
+                Op::SetPolicy {
+                    node,
+                    deletable,
+                    exportable,
+                }
             }
             other => return Err(Decode::Unknown(other)),
         })
@@ -545,6 +574,15 @@ mod tests {
             Op::MarkSensitive {
                 node: a,
                 sensitive: true,
+            },
+            Op::DeleteNode { node: b },
+            Op::Unlink {
+                edge: EdgeId([3; 16]),
+            },
+            Op::SetPolicy {
+                node: a,
+                deletable: false,
+                exportable: true,
             },
         ];
         let c = build_chain(&s, ops.iter().cloned().map(|op| (1, op)));

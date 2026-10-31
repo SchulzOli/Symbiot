@@ -180,3 +180,21 @@ marker path { stroke: none; }
 .proposal .sources { margin: 0.25rem 0 0.5rem; padding-left: 1.2rem; }
 .sensitive { gap: 0.4rem; margin: 0.5rem 0; }
 .lock { margin-left: 0.4rem; }
+
+/* E2/E3 — Richtlinie und Löschen */
+.policy { gap: 1rem; font-size: 0.9rem; }
+.policy label { gap: 0.4rem; }
+.hint { margin: 0; font-size: 0.85rem; color: var(--muted); }
+button.danger { background: var(--error); border-color: var(--error); color: var(--surface); }
+.chip.danger { background: transparent; color: var(--error); border-color: var(--error); }
+.confirm {
+  padding: 0.75rem 1rem;
+  border: 1px dashed var(--error);
+  border-radius: 10px;
+}
+.confirm p { margin: 0 0 0.5rem; }
+button.unlink {
+  background: none; border: none; padding: 0 0 0 0.4rem; color: var(--muted);
+  font-weight: 400; cursor: pointer;
+}
+button.unlink:hover { color: var(--error); }
