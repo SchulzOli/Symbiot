@@ -1,6 +1,6 @@
 # Entscheidungen
 
-Stand: 2026-10-30. Jede Entscheidung hat einen Status: **entschieden** (von Oliver), **Vorschlag** (wartet auf
+Stand: 2026-10-31. Jede Entscheidung hat einen Status: **entschieden** (von Oliver), **Vorschlag** (wartet auf
 Oliver) oder **offen**. Was hier entschieden ist, gilt vor PLAN.md und FEATURES.md, bis diese nachgezogen sind.
 
 ## E1 — Symbiot und Connect sind ein System · *entschieden*
@@ -42,7 +42,7 @@ System und muss in der Oberfläche ehrlich so stehen.
 - Das ist eine **technische Unterscheidung ohne Einfluss auf das Datenmodell**: Knoten haben überall
   dieselbe Form, damit Knoten und Ketten zwischen Geräten und Installationen kompatibel bleiben.
 
-**Vorschlag zur Umsetzung:** Die beiden Schalter stehen nicht im Knoten, sondern als **Richtlinie** in einem
+**Umsetzung (entschieden 2026-10-31):** Die beiden Schalter stehen nicht im Knoten, sondern als **Richtlinie** in einem
 eigenen Eintrag (`SetPolicy { node, deletable, exportable }`), den die Projektion auswertet:
 
 | Richtlinie | Wirkung |
@@ -65,7 +65,7 @@ damit: nicht löschbar, solange der Mensch es nicht ändert.
   vor jeder Regel.
 - Sensible Knoten verlassen das Heimnetz nie, auch nicht zur gehosteten KI.
 
-## E5 — Schlüsselverlust und Wiederherstellung · *Vorschlag*
+## E5 — Schlüsselverlust und Wiederherstellung · *entschieden (2026-10-31)*
 
 Ja, wir brauchen ein Konzept – aber ein kleines. Backups und Umzug auf ein neues Gerät sind der richtige
 Ansatz. Wichtig: Der **Geräteschlüssel wird dabei nicht mit umgezogen.**
@@ -89,7 +89,7 @@ Ansatz. Wichtig: Der **Geräteschlüssel wird dabei nicht mit umgezogen.**
 **Folge, die die Oberfläche klar sagen muss:** „Nicht exportierbar“ heißt, der Knoten lebt nur auf diesem
 einen Gerät. Geht das Gerät verloren, ist er weg. Beim Setzen des Schalters erscheint dieser Hinweis.
 
-## E6 — Verschlüsselung des Speichers · *Vorschlag*
+## E6 — Verschlüsselung des Speichers · *entschieden (2026-10-31)*
 
 Ja, SQLite ist heute der einzige Speicher: Die Kette ist dort die Wahrheit, Knoten und Kanten sind daraus
 abgeleitet. **Empfehlung: SQLite behalten und verschlüsseln, keine neue Datenbank.**
@@ -105,7 +105,7 @@ abgeleitet. **Empfehlung: SQLite behalten und verschlüsseln, keine neue Datenba
 Alternative, falls SQLCipher in Tauri mobil Probleme macht: Inhalte vor dem Speichern einzeln verschlüsseln
 (z. B. XChaCha20-Poly1305). Mehr Arbeit, aber unabhängig von der Datenbank.
 
-## E7 — Adapter und Plugins · *offen, Recherche liegt vor*
+## E7 — Adapter und Plugins · *entschieden (2026-10-31)*
 
 Wie kommen Kalender, Nachrichten, Geräte im Haus, Gesundheitsdaten und andere Apps herein, und wie sehen
 Anzeige-Plugins aus? Wir wollen auf dem Stand der Technik sein. Recherche: [RECHERCHE-ADAPTER.md](RECHERCHE-ADAPTER.md).
@@ -114,7 +114,7 @@ Bild: [adapter-modell.svg](adapter-modell.svg).
 
 ![Adapter-Modell](adapter-modell.svg)
 
-Kern der Empfehlung, zur Entscheidung: **Ein Adapter ist ein Gerät** mit eigenem Schlüssel und eigener Kette.
+Entschieden: **Ein Adapter ist ein Gerät** mit eigenem Schlüssel und eigener Kette.
 Fremde Adapter laufen als WebAssembly-Komponenten (wasmtime) mit vorab erklärten Rechten; der Host signiert,
 nicht der Adapter. Der Mensch erteilt und widerruft Zugriffe als Einträge in seiner Kette. Adapter beobachten
 nur; was daraus eigene Knoten oder Handlungen werden, bleibt ein Vorschlag. Zuerst: Kalender, Home Assistant,
@@ -126,7 +126,7 @@ Matrix lesend, dazu ein MCP-Server von Symbiot (nur lesen und vorschlagen).
 - **„Diesem Adapter vertrauen“:** Der Mensch kann einen Adapter als vertraut markieren. Dann werden seine
   Belege ohne Klick zu Knoten. Das ist ein Teil der Freigabe (`Grant`) in der Kette, jederzeit widerrufbar,
   und jeder so entstandene Knoten zeigt, dass er über das Vertrauen entstanden ist.
-- **Vorschlag zur Abgrenzung:** Vertrauen gilt nur für das Anlegen von Knoten. Handlungen nach außen (Mail
+- **Abgrenzung (entschieden 2026-10-31):** Vertrauen gilt nur für das Anlegen von Knoten. Handlungen nach außen (Mail
   senden, Licht schalten) bleiben immer ein Klick, und Belege, die eine Sensibilitäts-Regel (E4) treffen,
   ebenso.
 
@@ -145,12 +145,12 @@ beim ersten Adapter (Kalender) geprüft. Eigene Repos und Forks legt erst an, we
 - Auch bei vertrautem Text gilt weiter: Die KI schlägt nur vor, der Mensch entscheidet. Vertrauen öffnet also
   den Weg zur KI, nicht den Weg zu Handlungen.
 
-## E13 — Regeln fürs Bündeln · *Vorschlag, Recherche liegt vor*
+## E13 — Regeln fürs Bündeln · *entschieden (2026-10-31)*
 
 Sensoren und Adapter erzeugen viele Einträge. Gesucht sind Regeln für Bündeln, Aufbewahren und Checkpoints,
 die die Prüfbarkeit erhalten. Recherche: [RECHERCHE-BUENDELN.md](RECHERCHE-BUENDELN.md).
 
-Kern des Vorschlags:
+Entschieden:
 - **Gebündelt wird nur bei Maschinen**, nie bei Geräten von Menschen. Adapter schließen ein Bündel nach 60 s,
   256 Einträgen oder 16 KiB; Sensoren schreiben einen Eintrag pro 5 Minuten, Teil 0 ist eine Zusammenfassung.
 - **Drei Aufbewahrungsklassen:** roh · Zusammenfassung · nur Nachweis. Der Mensch legt sie pro Adapter fest
