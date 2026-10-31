@@ -317,19 +317,21 @@ fn History(id: NodeId, refresh: RwSignal<u32>) -> impl IntoView {
                     .into_iter()
                     .enumerate()
                     .map(|(i, e)| {
-                        let title = match &e.op {
-                            Op::CreateNode { title, .. } | Op::UpdateNode { title, .. } => {
-                                title.clone()
+                        let title = match e.op() {
+                            _ if e.is_pruned() => "Inhalt entfernt".to_string(),
+                            Ok(Op::CreateNode { title, .. } | Op::UpdateNode { title, .. }) => {
+                                format!("„{title}“")
                             }
-                            Op::AcceptProposal { proposal } => {
-                                format!("{} (KI-Vorschlag von {}, angenommen)", proposal.title, proposal.model)
+                            Ok(Op::AcceptProposal { proposal }) => {
+                                format!("„{}“ (KI-Vorschlag von {}, angenommen)", proposal.title, proposal.model)
                             }
-                            _ => String::new(),
+                            Ok(_) => String::new(),
+                            Err(err) => err.to_string(),
                         };
                         view! {
                             <li title=e.hash.to_hex()>
                                 <strong>{format!("Version {}", i + 1)}</strong>
-                                {format!(" · {} · „{}“ · Eintrag {} · {}", format_ms(e.ts_ms), title, e.seq, short(&e.hash.to_hex()))}
+                                {format!(" · {} · {} · Eintrag {} · {}", format_ms(e.head.ts_ms), title, e.head.seq, short(&e.hash.to_hex()))}
                             </li>
                         }
                     })

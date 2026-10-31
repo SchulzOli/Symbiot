@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 
 use symbiot_ai::{Advisor, Context, Info};
-use symbiot_core::{NodeKind, Proposal, Signer};
+use symbiot_core::{LedgerEntry, NodeKind, Op, Proposal, Signer};
 use symbiot_store::Store;
 use tower::ServiceExt;
 
@@ -185,7 +185,8 @@ async fn link_nodes_and_read_history() {
     assert_eq!(s, StatusCode::OK);
     let history = history.as_array().unwrap();
     assert_eq!(history.len(), 2);
-    assert_eq!(history[1]["op"]["update_node"]["title"], "Laufen 3x");
+    let update: LedgerEntry = serde_json::from_value(history[1].clone()).unwrap();
+    assert!(matches!(update.op(), Ok(Op::UpdateNode { title, .. }) if title == "Laufen 3x"));
 }
 
 async fn entries(app: &Router) -> usize {

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::bytes::{EdgeId, Hash, NodeId, PubKey};
 use crate::edge::{Edge, EdgeKind};
-use crate::ledger::{LedgerEntry, Op};
+use crate::ledger::{Decode, LedgerEntry, Op};
 use crate::proposal::Proposal;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -83,6 +83,8 @@ pub enum ApplyError {
     /// A proposal must name the nodes it is based on.
     NoSources,
     EmptyTitle,
+    /// The entry is validly signed but cannot be read (unknown kind or broken params).
+    Undecodable(Decode),
 }
 
 impl fmt::Display for ApplyError {
@@ -95,6 +97,7 @@ impl fmt::Display for ApplyError {
             ApplyError::DuplicateEdge => f.write_str("Diese Verbindung gibt es schon"),
             ApplyError::NoSources => f.write_str("Ein Vorschlag ohne Quellen wird verworfen"),
             ApplyError::EmptyTitle => f.write_str("Titel darf nicht leer sein"),
+            ApplyError::Undecodable(d) => write!(f, "Eintrag nicht lesbar: {d}"),
         }
     }
 }
@@ -127,16 +130,18 @@ impl Change {
         node: impl Fn(&NodeId) -> Option<Node>,
         has_edge: impl Fn(&NodeId, &NodeId, EdgeKind) -> bool,
     ) -> Result<Change, ApplyError> {
-        match &e.op {
+        let op = e.op().map_err(ApplyError::Undecodable)?;
+        let (author, ts_ms) = (e.head.author, e.head.ts_ms);
+        match &op {
             Op::CreateNode { kind, title, body } => Ok(Change::Node(Node {
                 id: NodeId::from_entry_hash(&e.hash),
                 kind: *kind,
                 title: title.clone(),
                 body: body.clone(),
-                author: e.author,
+                author,
                 version: 1,
-                created_ms: e.ts_ms,
-                updated_ms: e.ts_ms,
+                created_ms: ts_ms,
+                updated_ms: ts_ms,
                 history: alloc::vec![e.hash],
             })),
             Op::UpdateNode {
@@ -148,7 +153,7 @@ impl Change {
                 n.title = title.clone();
                 n.body = body.clone();
                 n.version += 1;
-                n.updated_ms = e.ts_ms;
+                n.updated_ms = ts_ms;
                 n.history.push(e.hash);
                 Ok(Change::Node(n))
             }
@@ -169,8 +174,8 @@ impl Change {
                     from: *from,
                     to: *to,
                     kind: *kind,
-                    author: e.author,
-                    created_ms: e.ts_ms,
+                    author,
+                    created_ms: ts_ms,
                     entry: e.hash,
                 }))
             }
@@ -183,10 +188,10 @@ impl Change {
                         kind: p.kind,
                         title: p.title.clone(),
                         body: p.body.clone(),
-                        author: e.author,
+                        author,
                         version: 1,
-                        created_ms: e.ts_ms,
-                        updated_ms: e.ts_ms,
+                        created_ms: ts_ms,
+                        updated_ms: ts_ms,
                         history: alloc::vec![e.hash],
                     },
                     edge: Edge {
@@ -194,8 +199,8 @@ impl Change {
                         from: id,
                         to: p.goal,
                         kind: EdgeKind::DerivesFrom,
-                        author: e.author,
-                        created_ms: e.ts_ms,
+                        author,
+                        created_ms: ts_ms,
                         entry: e.hash,
                     },
                 })
