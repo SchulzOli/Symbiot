@@ -6,7 +6,7 @@ mod graph;
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use symbiot_core::{Edge, Node, NodeId, NodeKind, VerifyReport};
+use symbiot_core::{Edge, Node, NodeId, NodeKind, Policy, VerifyReport};
 use wasm_bindgen::JsValue;
 
 fn main() {
@@ -103,6 +103,7 @@ fn Capture(on_saved: impl Fn() + Copy + 'static) -> impl IntoView {
     let kind = RwSignal::new(NodeKind::Goal);
     let title = RwSignal::new(String::new());
     let body = RwSignal::new(String::new());
+    let policy = RwSignal::new(Policy::default());
     let error = RwSignal::new(None::<String>);
     let busy = RwSignal::new(false);
 
@@ -114,12 +115,14 @@ fn Capture(on_saved: impl Fn() + Copy + 'static) -> impl IntoView {
                 kind.get_untracked(),
                 title.get_untracked(),
                 body.get_untracked(),
+                policy.get_untracked(),
             )
             .await
             {
                 Ok(_) => {
                     title.set(String::new());
                     body.set(String::new());
+                    policy.set(Policy::default());
                     error.set(None);
                     on_saved();
                 }
@@ -150,6 +153,7 @@ fn Capture(on_saved: impl Fn() + Copy + 'static) -> impl IntoView {
                 />
             </div>
             <textarea placeholder="Details (optional)" rows="2" bind:value=body></textarea>
+            <detail::PolicySwitches policy on_change=|_| () />
             <div class="row end">
                 {move || error.get().map(|e| view! { <span class="error">{e}</span> })}
                 <button type="submit" disabled=move || busy.get()>"Festhalten"</button>
@@ -227,9 +231,14 @@ fn Verify(refresh: RwSignal<u32>) -> impl IntoView {
                 Ok(r) if r.ok => view! {
                     <span class="ok" title=r.device.to_hex()>
                         {format!(
-                            "✓ Kette ok · {} {} · Gerät {}",
+                            "✓ Kette ok · {} {}{} · Gerät {}",
                             r.entries,
                             if r.entries == 1 { "Eintrag" } else { "Einträge" },
+                            if r.pruned > 0 {
+                                format!(", davon {} ohne Inhalt (gelöscht)", r.pruned)
+                            } else {
+                                String::new()
+                            },
                             short(&r.device.to_hex()),
                         )}
                     </span>

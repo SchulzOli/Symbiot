@@ -4,7 +4,9 @@
 use std::sync::{Arc, Mutex};
 
 use symbiot_ai::{Advisor, Info};
-use symbiot_core::{Edge, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Proposal, VerifyReport};
+use symbiot_core::{
+    Edge, EdgeId, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal, VerifyReport,
+};
 use symbiot_store::Store;
 use tauri::{Manager, State};
 
@@ -28,8 +30,48 @@ fn create_node(
     kind: NodeKind,
     title: String,
     body: String,
+    deletable: Option<bool>,
+    exportable: Option<bool>,
 ) -> Result<Node, String> {
-    store.with(|s| s.create_node(kind, &title, &body))
+    let policy = Policy {
+        deletable: deletable.unwrap_or(true),
+        exportable: exportable.unwrap_or(true),
+    };
+    store.with(|s| s.create_node_with(kind, &title, &body, policy))
+}
+
+/// E2: returns how many entries lost their content.
+#[tauri::command]
+fn delete_node(store: State<AppStore>, id: NodeId) -> Result<usize, String> {
+    store.with(|s| s.delete_node(id))
+}
+
+#[tauri::command]
+fn node_policy(store: State<AppStore>, id: NodeId) -> Result<Policy, String> {
+    store.with(|s| s.policy(id))
+}
+
+#[tauri::command]
+fn set_policy(
+    store: State<AppStore>,
+    id: NodeId,
+    deletable: bool,
+    exportable: bool,
+) -> Result<(), String> {
+    store.with(|s| {
+        s.set_policy(
+            id,
+            Policy {
+                deletable,
+                exportable,
+            },
+        )
+    })
+}
+
+#[tauri::command]
+fn unlink_edge(store: State<AppStore>, id: EdgeId) -> Result<(), String> {
+    store.with(|s| s.unlink(id))
 }
 
 #[tauri::command]
@@ -80,10 +122,10 @@ async fn propose_next(
 ) -> Result<Proposal, String> {
     let not_configured = || symbiot_ai::Error::NotConfigured.to_string();
     let advisor = ai.0.clone().ok_or_else(not_configured)?;
-    let (nodes, edges, sensitive) =
-        store.with(|s| Ok((s.nodes(None)?, s.edges()?, s.sensitive_nodes()?)))?;
+    let (nodes, edges, home_only) =
+        store.with(|s| Ok((s.nodes(None)?, s.edges()?, s.home_only_nodes()?)))?;
     let ctx =
-        symbiot_ai::context(goal, &nodes, &edges, &sensitive, remote).map_err(|e| e.to_string())?;
+        symbiot_ai::context(goal, &nodes, &edges, &home_only, remote).map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || advisor.propose(&ctx))
         .await
         .map_err(|e| e.to_string())?
@@ -148,7 +190,11 @@ pub fn run() {
             accept_proposal,
             reject_proposal,
             list_sensitive,
-            set_sensitive
+            set_sensitive,
+            delete_node,
+            node_policy,
+            set_policy,
+            unlink_edge
         ])
         .run(tauri::generate_context!())
         .expect("error while running Symbiot");

@@ -1,7 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-// F1 + F2 + F3 in one walk through the real UI: capture, connect, edit, see the graph, verify the chain.
-test("erfassen, verbinden, bearbeiten, Graph, Kette prüfen", async ({ page }) => {
+// F1 + F2 + F3 + E2 in one walk through the real UI: capture, connect, edit, see the graph,
+// verify the chain, unlink and delete.
+test("erfassen, verbinden, bearbeiten, Graph, Kette prüfen, löschen", async ({ page }) => {
   await page.goto("/");
   const capture = page.locator("form.capture");
   const cards = page.getByTestId("node-card");
@@ -45,4 +46,19 @@ test("erfassen, verbinden, bearbeiten, Graph, Kette prüfen", async ({ page }) =
   // 2 nodes + 1 link + 1 edit = 4 signed entries, chain intact.
   await page.getByRole("button", { name: "Kette prüfen" }).click();
   await expect(page.getByText(/✓ Kette ok · 4 Einträge/)).toBeVisible();
+
+  // Unlink, then delete the evidence: both versions lose their content, the chain stays valid.
+  await page.getByRole("button", { name: "Liste" }).click();
+  await cards.filter({ hasText: "5,2 km gelaufen" }).click();
+  await detail.getByRole("button", { name: "Verbindung lösen" }).click();
+  await expect(detail.getByText("→ stützt „Laufen“")).toHaveCount(0);
+  await detail.getByRole("button", { name: "Löschen" }).click();
+  await expect(page.getByTestId("confirm-delete")).toContainText("Titel und Text aller Versionen");
+  await page.getByRole("button", { name: "Endgültig löschen" }).click();
+  await expect(cards).toHaveCount(1);
+  await expect(page.getByTestId("detail")).toHaveCount(0);
+
+  // + 1 unlink + 1 deletion marker = 6 entries, 2 of them without content.
+  await page.getByRole("button", { name: "Kette prüfen" }).click();
+  await expect(page.getByText("✓ Kette ok · 6 Einträge, davon 2 ohne Inhalt (gelöscht)")).toBeVisible();
 });
