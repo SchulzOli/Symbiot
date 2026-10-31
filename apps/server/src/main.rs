@@ -44,6 +44,9 @@ async fn main() {
     let store = symbiot_store::Store::open_dir(&data)
         .unwrap_or_else(|e| panic!("cannot open store in {}: {e}", data.display()));
     tracing::info!(device = %store.device(), data = %data.display(), ui = ?ui, "store opened");
+    if let Some(old) = store.set_aside_v1() {
+        tracing::warn!(file = %old.display(), "old v1 database set aside, starting a fresh v2 chain");
+    }
     // Without SYMBIOT_AI_URL everything works except „Nächsten Schritt vorschlagen“.
     let ai = symbiot_ai::Config::from_env().map(|c| {
         tracing::info!(url = %c.url, model = %c.local_model, remote = ?c.remote_model, "ai configured");
