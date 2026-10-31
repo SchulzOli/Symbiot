@@ -1,6 +1,6 @@
 //! Nodes of the personal graph and the projection that builds them from ledger entries.
 
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::bytes::{EdgeId, Hash, NodeId, PubKey};
 use crate::edge::{Edge, EdgeKind};
 use crate::ledger::{LedgerEntry, Op};
+use crate::proposal::Proposal;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -79,6 +80,9 @@ pub enum ApplyError {
     UnknownNode(NodeId),
     SelfLink,
     DuplicateEdge,
+    /// A proposal must name the nodes it is based on.
+    NoSources,
+    EmptyTitle,
 }
 
 impl fmt::Display for ApplyError {
@@ -89,6 +93,8 @@ impl fmt::Display for ApplyError {
                 f.write_str("Ein Knoten kann nicht mit sich selbst verbunden werden")
             }
             ApplyError::DuplicateEdge => f.write_str("Diese Verbindung gibt es schon"),
+            ApplyError::NoSources => f.write_str("Ein Vorschlag ohne Quellen wird verworfen"),
+            ApplyError::EmptyTitle => f.write_str("Titel darf nicht leer sein"),
         }
     }
 }
@@ -99,6 +105,17 @@ pub enum Change {
     /// A new node, or the next version of an existing one.
     Node(Node),
     Edge(Edge),
+    /// An accepted proposal: the new node and its edge „derives from“ the goal.
+    Accepted {
+        node: Node,
+        edge: Edge,
+    },
+    /// A rejected proposal: nothing changes in the graph.
+    Rejected,
+    Sensitivity {
+        node: NodeId,
+        sensitive: bool,
+    },
 }
 
 impl Change {
@@ -157,8 +174,64 @@ impl Change {
                     entry: e.hash,
                 }))
             }
+            Op::AcceptProposal { proposal: p } => {
+                check_proposal(p, &node)?;
+                let id = NodeId::from_entry_hash(&e.hash);
+                Ok(Change::Accepted {
+                    node: Node {
+                        id,
+                        kind: p.kind,
+                        title: p.title.clone(),
+                        body: p.body.clone(),
+                        author: e.author,
+                        version: 1,
+                        created_ms: e.ts_ms,
+                        updated_ms: e.ts_ms,
+                        history: alloc::vec![e.hash],
+                    },
+                    edge: Edge {
+                        id: EdgeId::from_entry_hash(&e.hash),
+                        from: id,
+                        to: p.goal,
+                        kind: EdgeKind::DerivesFrom,
+                        author: e.author,
+                        created_ms: e.ts_ms,
+                        entry: e.hash,
+                    },
+                })
+            }
+            Op::RejectProposal { proposal: p } => {
+                check_proposal(p, &node)?;
+                Ok(Change::Rejected)
+            }
+            Op::MarkSensitive {
+                node: id,
+                sensitive,
+            } => {
+                node(id).ok_or(ApplyError::UnknownNode(*id))?;
+                Ok(Change::Sensitivity {
+                    node: *id,
+                    sensitive: *sensitive,
+                })
+            }
         }
     }
+}
+
+/// Same rules for accepting and rejecting: a proposal names a known goal and known sources.
+fn check_proposal(p: &Proposal, node: &impl Fn(&NodeId) -> Option<Node>) -> Result<(), ApplyError> {
+    if p.title.trim().is_empty() {
+        return Err(ApplyError::EmptyTitle);
+    }
+    if p.sources.is_empty() {
+        return Err(ApplyError::NoSources);
+    }
+    for id in core::iter::once(&p.goal).chain(&p.sources) {
+        if node(id).is_none() {
+            return Err(ApplyError::UnknownNode(*id));
+        }
+    }
+    Ok(())
 }
 
 /// In-memory projection of verified entries — used by tests and small devices.
@@ -167,6 +240,7 @@ impl Change {
 pub struct State {
     pub nodes: BTreeMap<NodeId, Node>,
     pub edges: BTreeMap<EdgeId, Edge>,
+    pub sensitive: BTreeSet<NodeId>,
 }
 
 impl State {
@@ -186,6 +260,18 @@ impl State {
             }
             Change::Edge(x) => {
                 self.edges.insert(x.id, x.clone());
+            }
+            Change::Accepted { node, edge } => {
+                self.nodes.insert(node.id, node.clone());
+                self.edges.insert(edge.id, edge.clone());
+            }
+            Change::Rejected => {}
+            Change::Sensitivity { node, sensitive } => {
+                if *sensitive {
+                    self.sensitive.insert(*node);
+                } else {
+                    self.sensitive.remove(node);
+                }
             }
         }
         Ok(change)
@@ -295,5 +381,121 @@ mod tests {
         // The reverse direction is a different connection.
         assert!(push(&mut st, link(a, b)).is_ok());
         assert_eq!(st.edges.len(), 2);
+    }
+
+    /// F4: only a decision changes the graph, and only a proposal with known sources is accepted.
+    #[test]
+    fn proposal_decisions() {
+        let s = Signer::from_seed([4; 32]);
+        let mut st = State::default();
+        let mut chain: Vec<LedgerEntry> = Vec::new();
+        let mut push = |st: &mut State, op: Op| {
+            let e = s.append(chain.last(), chain.len() as u64, op);
+            chain.push(e.clone());
+            st.apply(&e)
+        };
+        let goal = match push(
+            &mut st,
+            Op::CreateNode {
+                kind: NodeKind::Goal,
+                title: "Laufen".into(),
+                body: String::new(),
+            },
+        )
+        .unwrap()
+        {
+            Change::Node(n) => n.id,
+            _ => unreachable!(),
+        };
+        let proposal = |sources: Vec<NodeId>| Proposal {
+            goal,
+            kind: NodeKind::Goal,
+            title: "Laufschuhe kaufen".into(),
+            body: String::new(),
+            sources,
+            model: "qwen3:8b".into(),
+        };
+
+        // Rejecting keeps the graph as it is.
+        let before = (st.nodes.len(), st.edges.len());
+        assert_eq!(
+            push(
+                &mut st,
+                Op::RejectProposal {
+                    proposal: proposal(alloc::vec![goal])
+                }
+            ),
+            Ok(Change::Rejected)
+        );
+        assert_eq!((st.nodes.len(), st.edges.len()), before);
+
+        // Without sources or with unknown sources nothing is accepted.
+        let none = Op::AcceptProposal {
+            proposal: proposal(Vec::new()),
+        };
+        assert_eq!(push(&mut st, none), Err(ApplyError::NoSources));
+        let ghost = NodeId([8; 16]);
+        let unknown = Op::AcceptProposal {
+            proposal: proposal(alloc::vec![ghost]),
+        };
+        assert_eq!(push(&mut st, unknown), Err(ApplyError::UnknownNode(ghost)));
+
+        // Accepting creates the node and its edge „derives from“ the goal.
+        let ok = push(
+            &mut st,
+            Op::AcceptProposal {
+                proposal: proposal(alloc::vec![goal]),
+            },
+        );
+        let Ok(Change::Accepted { node, edge }) = ok else {
+            panic!("{ok:?}")
+        };
+        assert_eq!(node.title, "Laufschuhe kaufen");
+        assert_eq!(
+            (edge.from, edge.to, edge.kind),
+            (node.id, goal, EdgeKind::DerivesFrom)
+        );
+        assert_eq!((st.nodes.len(), st.edges.len()), (2, 1));
+    }
+
+    #[test]
+    fn sensitivity_is_a_separate_entry() {
+        let s = Signer::from_seed([6; 32]);
+        let c = s.append(
+            None,
+            1,
+            Op::CreateNode {
+                kind: NodeKind::Reflection,
+                title: "Arzttermin".into(),
+                body: String::new(),
+            },
+        );
+        let id = NodeId::from_entry_hash(&c.hash);
+        let on = s.append(
+            Some(&c),
+            2,
+            Op::MarkSensitive {
+                node: id,
+                sensitive: true,
+            },
+        );
+        let off = s.append(
+            Some(&on),
+            3,
+            Op::MarkSensitive {
+                node: id,
+                sensitive: false,
+            },
+        );
+
+        let mut st = State::default();
+        st.apply(&c).unwrap();
+        let node = st.nodes[&id].clone();
+        st.apply(&on).unwrap();
+        assert!(st.sensitive.contains(&id));
+        // The node itself is unchanged: same shape on every device.
+        assert_eq!(st.nodes[&id], node);
+        st.apply(&off).unwrap();
+        assert!(st.sensitive.is_empty());
     }
 }

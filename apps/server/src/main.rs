@@ -44,13 +44,18 @@ async fn main() {
     let store = symbiot_store::Store::open_dir(&data)
         .unwrap_or_else(|e| panic!("cannot open store in {}: {e}", data.display()));
     tracing::info!(device = %store.device(), data = %data.display(), ui = ?ui, "store opened");
+    // Without SYMBIOT_AI_URL everything works except „Nächsten Schritt vorschlagen“.
+    let ai = symbiot_ai::Config::from_env().map(|c| {
+        tracing::info!(url = %c.url, model = %c.local_model, remote = ?c.remote_model, "ai configured");
+        std::sync::Arc::new(symbiot_ai::LiteLlm::new(c)) as std::sync::Arc<dyn symbiot_ai::Advisor>
+    });
 
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .unwrap_or_else(|e| panic!("cannot bind {addr}: {e}"));
     tracing::info!(%addr, "symbiot-server listening");
 
-    axum::serve(listener, symbiot_server::app(store, ui))
+    axum::serve(listener, symbiot_server::app(store, ui, ai))
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
         })
