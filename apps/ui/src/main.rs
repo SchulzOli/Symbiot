@@ -20,8 +20,12 @@ enum Mode {
     Graph,
 }
 
-async fn load() -> Result<(Vec<Node>, Vec<Edge>), String> {
-    Ok((api::list_nodes(None).await?, api::list_edges().await?))
+async fn load() -> Result<(Vec<Node>, Vec<Edge>, Vec<NodeId>), String> {
+    Ok((
+        api::list_nodes(None).await?,
+        api::list_edges().await?,
+        api::list_sensitive().await?,
+    ))
 }
 
 #[component]
@@ -54,9 +58,10 @@ fn App() -> impl IntoView {
             {move || match data.get() {
                 None => view! { <p class="muted">"Lade …"</p> }.into_any(),
                 Some(Err(e)) => view! { <p class="error">{e}</p> }.into_any(),
-                Some(Ok((nodes, edges))) => {
+                Some(Ok((nodes, edges, sensitive))) => {
                     let detail = selected.get().and_then(|id| nodes.iter().find(|n| n.id == id).cloned()).map(|node| {
-                        view! { <detail::Detail node nodes=nodes.clone() edges=edges.clone() selected on_saved=saved refresh=version /> }
+                        let is_sensitive = sensitive.contains(&node.id);
+                        view! { <detail::Detail node nodes=nodes.clone() edges=edges.clone() sensitive=is_sensitive selected on_saved=saved refresh=version /> }
                     });
                     let shown: Vec<Node> = nodes
                         .iter()
@@ -68,7 +73,10 @@ fn App() -> impl IntoView {
                         Mode::List if shown.is_empty() => view! { <p class="muted">"Noch nichts festgehalten."</p> }.into_any(),
                         Mode::List => view! {
                             <section class="nodes">
-                                {shown.into_iter().map(|n| view! { <NodeCard node=n selected /> }).collect_view()}
+                                {shown.into_iter().map(|n| {
+                                    let locked = sensitive.contains(&n.id);
+                                    view! { <NodeCard node=n locked selected /> }
+                                }).collect_view()}
                             </section>
                         }.into_any(),
                     };
@@ -78,11 +86,12 @@ fn App() -> impl IntoView {
             <Verify refresh=version />
             <footer>
                 {format!(
-                    "Daten: {} · core {} · protocol {}",
+                    "Daten: {} · core {} · protocol {} · ",
                     api::backend_label(),
                     symbiot_core::VERSION,
                     symbiot_core::PROTOCOL_VERSION,
                 )}
+                <a href=feedback_url() target="_blank" rel="noopener">"Feedback"</a>
             </footer>
         </main>
     }
@@ -171,7 +180,7 @@ fn Filter(filter: RwSignal<Option<NodeKind>>) -> impl IntoView {
 }
 
 #[component]
-fn NodeCard(node: Node, selected: RwSignal<Option<NodeId>>) -> impl IntoView {
+fn NodeCard(node: Node, locked: bool, selected: RwSignal<Option<NodeId>>) -> impl IntoView {
     let id = node.id;
     let changed = format_ms(node.updated_ms);
     let meta = if node.version > 1 {
@@ -192,6 +201,7 @@ fn NodeCard(node: Node, selected: RwSignal<Option<NodeId>>) -> impl IntoView {
             on:click=move |_| selected.set(Some(id))
         >
             <span class=format!("kind kind-{}", node.kind.as_str())>{node.kind.label()}</span>
+            {locked.then(|| view! { <span class="lock" title="Sensibel – verlässt nie das Heimnetz">"🔒"</span> })}
             <h3>{node.title}</h3>
             {(!node.body.is_empty()).then(|| view! { <p>{node.body.clone()}</p> })}
             <small class="muted" title=node.id.to_hex()>{meta}</small>
@@ -231,6 +241,21 @@ fn Verify(refresh: RwSignal<u32>) -> impl IntoView {
             })}
         </section>
     }
+}
+
+/// Feedback becomes a GitHub issue (M3 Rückkanal). Pre-filled, nothing is sent without the human.
+fn feedback_url() -> String {
+    let body = format!(
+        "**Was ist passiert / was wünschst du dir?**\n\n\n---\nSymbiot core {} · protocol {} · {}",
+        symbiot_core::VERSION,
+        symbiot_core::PROTOCOL_VERSION,
+        api::backend_label()
+    );
+    format!(
+        "https://github.com/SchulzOli/Symbiot/issues/new?labels=feedback&title={}&body={}",
+        String::from(js_sys::encode_uri_component("Feedback: ")),
+        String::from(js_sys::encode_uri_component(&body)),
+    )
 }
 
 pub(crate) fn short(hex: &str) -> String {
