@@ -16,7 +16,7 @@ Hervorgegangen aus dem Ideengarten *TrustInAI*. Benannt nach der *Symbiose Mensc
 - [docs/PLAN.md](docs/PLAN.md): Meilensteine M0–M6, Lifecycle, Checkpoints
 - [docs/FEATURES.md](docs/FEATURES.md): erste Features F1–F7 mit Abnahmekriterien
 - [docs/BETRIEB.md](docs/BETRIEB.md): Weg eines Commits bis heimserver, Release, Einrichtung, Prüfen
-- [docs/ENTSCHEIDUNGEN.md](docs/ENTSCHEIDUNGEN.md): Entscheidungen und Vorschläge (Löschen, Schlüssel, Verschlüsselung, Symbiot + Connect)
+- [docs/ENTSCHEIDUNGEN.md](docs/ENTSCHEIDUNGEN.md): Entscheidungen E1–E13 (Löschen, Schlüssel, Verschlüsselung, Adapter, Bündeln, Symbiot + Connect)
 
 ## Aufbau
 | Teil | Rolle |
