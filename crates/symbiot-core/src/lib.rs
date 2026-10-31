@@ -21,7 +21,7 @@ pub use ledger::{
     ContentRef, Decode, Head, LedgerEntry, Op, Part, Signer, VerifyError, VerifyReport,
     build_chain, verify_chain,
 };
-pub use node::{ApplyError, Change, Node, NodeKind, State};
+pub use node::{ApplyError, Change, Lookup, Node, NodeKind, Policy, State};
 pub use proposal::Proposal;
 
 /// Version of the ledger/sync wire format. Bumped on any breaking change,

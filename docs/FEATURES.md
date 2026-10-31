@@ -10,10 +10,22 @@ Ich halte fest, was mich beschäftigt.
 
 ## F2 — Beweisbar *(M1)*
 Nichts wird heimlich verändert.
-- Jede Änderung ist ein signierter Eintrag in der Kette des Geräts: `hash = sha256(prev ‖ postcard(entry))` plus Ed25519-Signatur.
+- Jede Änderung ist ein signierter Eintrag in der Kette des Geräts. Seit Protokoll 2 (E2, E13) besteht ein Eintrag
+  aus einem signierten Kopf und entfernbarem, gesalzenem Inhalt:
+  `hash = sha256("symbiot/entry/v2" ‖ postcard(protocol, kopf))` plus Ed25519-Signatur; der Kopf trägt den
+  Merkle-Root (RFC 9162) über den Inhalt. Fehlender Inhalt ist gültig, veränderter wird erkannt.
 - Knopf „Kette prüfen“ zeigt `ok · N Einträge` oder die genaue Bruchstelle.
 - Bearbeiten heißt neuer Eintrag. Die alte Version bleibt sichtbar.
 - **Fertig, wenn:** Ein Property-Test beweist, dass jedes veränderte Byte, jeder vertauschte und jeder fehlende Eintrag erkannt wird.
+
+### Löschen und Richtlinien *(E2, E3)*
+- Löschen ist ein Löschmarker (`Op::DeleteNode`, `Op::Unlink`). Der Knoten und seine Verbindungen verschwinden.
+- Pro Knoten „löschbar“ und „exportierbar“ (`Op::SetPolicy`, Standard: beides ja), beim Anlegen und später
+  änderbar. Löschbar: Titel und Text aller Versionen werden weggeräumt (`secure_delete`, WAL-Checkpoint).
+  Nicht löschbar: nur ausgeblendet. Nicht exportierbar: geht nie zu einem externen Modell.
+- **Fertig, wenn:** Nach dem Löschen steht der Text nicht mehr in der Datenbankdatei und „Kette prüfen“ ist ok.
+  ✅ `crates/symbiot-store` (`deleting_removes_the_content_from_the_file`), `apps/server/tests/api.rs`,
+  `e2e/tests/verknuepfen.spec.ts`.
 
 ## F3 — Verknüpfen *(M2)*
 Zusammenhänge sichtbar machen.
