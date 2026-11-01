@@ -4,15 +4,18 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::body::Bytes;
+use axum::extract::{OriginalUri, Path, Query, State};
+use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use symbiot_ai::Advisor;
-use symbiot_core::{Edge, EdgeId, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal};
-use symbiot_store::{Store, VerifyReport};
+use symbiot_core::{
+    Edge, EdgeId, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal, PubKey,
+};
+use symbiot_store::{ChainHead, DeviceInfo, Store, VerifyReport};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
@@ -52,7 +55,13 @@ pub fn app(store: Store, ui_dir: Option<PathBuf>, ai: Option<Arc<dyn Advisor>>) 
         .route("/edges", get(list_edges).post(create_edge))
         .route("/edges/{id}", delete(unlink))
         .route("/ledger", get(ledger))
-        .route("/ledger/verify", get(verify));
+        .route("/ledger/verify", get(verify))
+        .route("/person", get(person))
+        .route("/person/words", post(new_words))
+        .route("/person/certify", post(certify))
+        .route("/person/revoke", post(revoke))
+        .route("/sync/heads", get(sync_heads))
+        .route("/sync/chains/{author}", get(sync_pull).post(sync_push));
 
     let state = AppState {
         store: Mutex::new(store),
@@ -305,6 +314,163 @@ async fn verify(State(s): State<Shared>) -> Result<Json<VerifyReport>, ApiError>
     Ok(Json(report))
 }
 
+/// E5: who this device belongs to, and the person's devices known here.
+#[derive(Serialize)]
+pub struct PersonInfo {
+    pub device: PubKey,
+    pub person: Option<PubKey>,
+    pub devices: Vec<DeviceInfo>,
+}
+
+async fn person(State(s): State<Shared>) -> Result<Json<PersonInfo>, ApiError> {
+    let store = lock(&s);
+    Ok(Json(PersonInfo {
+        device: store.device(),
+        person: store.person()?,
+        devices: store.devices()?,
+    }))
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Words {
+    pub words: String,
+}
+
+/// 24 new recovery words. Nothing is stored; they are only shown once.
+async fn new_words() -> Result<Json<Words>, ApiError> {
+    Ok(Json(Words {
+        words: symbiot_store::new_words()?,
+    }))
+}
+
+#[derive(Deserialize)]
+pub struct Certify {
+    pub words: String,
+    pub name: String,
+}
+
+async fn certify(
+    State(s): State<Shared>,
+    Json(c): Json<Certify>,
+) -> Result<Json<PersonInfo>, ApiError> {
+    let person = lock(&s).certify_self(&c.words, &c.name)?;
+    // Never the words in the log.
+    tracing::info!(%person, name = %c.name, "device certified");
+    person_info(&s)
+}
+
+#[derive(Deserialize)]
+pub struct Revoke {
+    pub words: String,
+    pub device: PubKey,
+}
+
+async fn revoke(
+    State(s): State<Shared>,
+    Json(r): Json<Revoke>,
+) -> Result<Json<PersonInfo>, ApiError> {
+    lock(&s).revoke_device(&r.words, r.device)?;
+    tracing::warn!(device = %r.device, "device revoked");
+    person_info(&s)
+}
+
+fn person_info(s: &Shared) -> Result<Json<PersonInfo>, ApiError> {
+    let store = lock(s);
+    Ok(Json(PersonInfo {
+        device: store.device(),
+        person: store.person()?,
+        devices: store.devices()?,
+    }))
+}
+
+/// M4: which device signed this request (see `symbiot_sync::request_message`).
+fn device_of(
+    headers: &HeaderMap,
+    method: &Method,
+    uri: &OriginalUri,
+    body: &[u8],
+) -> Result<PubKey, ApiError> {
+    let h = |name| headers.get(name).and_then(|v| v.to_str().ok());
+    let path = uri.0.path_and_query().map_or("/", |p| p.as_str());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    symbiot_sync::verify_request(
+        h(symbiot_sync::HEADER_DEVICE),
+        h(symbiot_sync::HEADER_TIME),
+        h(symbiot_sync::HEADER_SIG),
+        method.as_str(),
+        path,
+        body,
+        now,
+    )
+    .map_err(|e| ApiError(StatusCode::UNAUTHORIZED, e.to_string()))
+}
+
+fn require_trusted(s: &Shared, device: &PubKey) -> Result<(), ApiError> {
+    if lock(s).trusts(device)? {
+        Ok(())
+    } else {
+        Err(symbiot_store::Error::Untrusted.into())
+    }
+}
+
+/// Where every chain known here stands. Any signed device may ask; it learns no content.
+async fn sync_heads(
+    State(s): State<Shared>,
+    method: Method,
+    uri: OriginalUri,
+    headers: HeaderMap,
+) -> Result<Json<Vec<ChainHead>>, ApiError> {
+    device_of(&headers, &method, &uri, b"")?;
+    Ok(Json(lock(&s).heads()?))
+}
+
+#[derive(Deserialize)]
+pub struct After {
+    pub after: Option<u64>,
+}
+
+async fn sync_pull(
+    State(s): State<Shared>,
+    method: Method,
+    uri: OriginalUri,
+    headers: HeaderMap,
+    Path(author): Path<String>,
+    Query(a): Query<After>,
+) -> Result<Json<Vec<LedgerEntry>>, ApiError> {
+    let device = device_of(&headers, &method, &uri, b"")?;
+    require_trusted(&s, &device)?;
+    let author = PubKey::from_hex(&author).ok_or(ApiError::bad("ungültiger Geräteschlüssel"))?;
+    Ok(Json(lock(&s).chain_since(&author, a.after)?))
+}
+
+/// A device sends its chain. A new device introduces itself this way: its certificate is in
+/// the chain. Other chains only from devices that already count.
+async fn sync_push(
+    State(s): State<Shared>,
+    method: Method,
+    uri: OriginalUri,
+    headers: HeaderMap,
+    Path(author): Path<String>,
+    body: Bytes,
+) -> Result<Json<symbiot_sync::Pushed>, ApiError> {
+    let device = device_of(&headers, &method, &uri, &body)?;
+    let author = PubKey::from_hex(&author).ok_or(ApiError::bad("ungültiger Geräteschlüssel"))?;
+    if device != author {
+        require_trusted(&s, &device)?;
+    }
+    let entries: Vec<LedgerEntry> =
+        serde_json::from_slice(&body).map_err(|_| ApiError::bad("unlesbare Einträge"))?;
+    if entries.iter().any(|e| e.head.author != author) {
+        return Err(ApiError::bad("Einträge gehören nicht zu dieser Kette"));
+    }
+    let received = lock(&s).receive(entries)?;
+    tracing::info!(%device, %author, received, "chain received");
+    Ok(Json(symbiot_sync::Pushed { received }))
+}
+
 fn lock(s: &Shared) -> MutexGuard<'_, Store> {
     // Writes are transactions, so a panic while holding the lock leaves SQLite consistent.
     s.store.lock().unwrap_or_else(|p| p.into_inner())
@@ -328,6 +494,13 @@ impl From<symbiot_store::Error> for ApiError {
         match e {
             Invalid(_) => ApiError(StatusCode::BAD_REQUEST, e.to_string()),
             UnknownNode(_) | UnknownEdge(_) => ApiError(StatusCode::NOT_FOUND, e.to_string()),
+            BadChain(_) => ApiError(StatusCode::BAD_REQUEST, e.to_string()),
+            Untrusted => ApiError(StatusCode::FORBIDDEN, e.to_string()),
+            Fork { .. } => {
+                // ERROR so Dozzle raises an alert: a device key was used twice.
+                tracing::error!(error = %e, "fork in a chain");
+                ApiError(StatusCode::CONFLICT, e.to_string())
+            }
             Sqlite(_) | Encoding(_) => {
                 tracing::error!(error = %e, "store failure");
                 ApiError(StatusCode::INTERNAL_SERVER_ERROR, "interner Fehler".into())
