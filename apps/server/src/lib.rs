@@ -56,6 +56,7 @@ pub fn app(store: Store, ui_dir: Option<PathBuf>, ai: Option<Arc<dyn Advisor>>) 
         .route("/edges/{id}", delete(unlink))
         .route("/ledger", get(ledger))
         .route("/ledger/verify", get(verify))
+        .route("/ledger/verify-all", get(verify_all))
         .route("/person", get(person))
         .route("/person/words", post(new_words))
         .route("/person/certify", post(certify))
@@ -312,6 +313,15 @@ async fn verify(State(s): State<Shared>) -> Result<Json<VerifyReport>, ApiError>
         tracing::error!(error = ?report.error, "ledger verification failed");
     }
     Ok(Json(report))
+}
+
+/// M4: every chain known here, including those of the other devices.
+async fn verify_all(State(s): State<Shared>) -> Result<Json<Vec<VerifyReport>>, ApiError> {
+    let reports = lock(&s).verify_all()?;
+    for r in reports.iter().filter(|r| !r.ok) {
+        tracing::error!(device = %r.device, error = ?r.error, "ledger verification failed");
+    }
+    Ok(Json(reports))
 }
 
 /// E5: who this device belongs to, and the person's devices known here.

@@ -597,6 +597,17 @@ impl Store {
     pub fn verify(&self) -> Result<VerifyReport> {
         Ok(VerifyReport::of(self.device(), &self.entries()?))
     }
+
+    /// Every chain known here, this device's first (M4).
+    pub fn verify_all(&self) -> Result<Vec<VerifyReport>> {
+        let me = self.device();
+        let mut reports: Vec<VerifyReport> = all_chains(&self.conn)?
+            .iter()
+            .map(|c| VerifyReport::of(c[0].head.author, c))
+            .collect();
+        reports.sort_by_key(|r| r.device != me);
+        Ok(reports)
+    }
 }
 
 /// The time for a new entry: now, but never before anything already in the ledger. Then a new

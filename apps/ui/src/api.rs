@@ -4,7 +4,8 @@
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use symbiot_core::{
-    Edge, EdgeId, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal, VerifyReport,
+    Edge, EdgeId, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal, PubKey,
+    VerifyReport,
 };
 use wasm_bindgen::{JsCast, JsValue};
 
@@ -172,6 +173,124 @@ pub async fn verify() -> ApiResult<VerifyReport> {
         return invoke("verify_ledger", &NoArgs {}).await;
     }
     http_json(gloo_net::http::Request::get("/api/ledger/verify").build()).await
+}
+
+/// M4: every chain known here, this device's first.
+pub async fn verify_all() -> ApiResult<Vec<VerifyReport>> {
+    #[derive(Serialize)]
+    struct NoArgs {}
+    if tauri_invoke_fn().is_some() {
+        return invoke("verify_all", &NoArgs {}).await;
+    }
+    http_json(gloo_net::http::Request::get("/api/ledger/verify-all").build()).await
+}
+
+/// Mirrors `symbiot_store::DeviceInfo` (the store is native-only).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct DeviceInfo {
+    pub key: PubKey,
+    pub name: String,
+    pub revoked_after: Option<u64>,
+    pub entries: u64,
+    pub last_ms: Option<u64>,
+    pub this_device: bool,
+}
+
+/// E5: this device, the person it belongs to (if set up) and the person's devices.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct PersonInfo {
+    pub device: PubKey,
+    pub person: Option<PubKey>,
+    pub devices: Vec<DeviceInfo>,
+}
+
+pub async fn person() -> ApiResult<PersonInfo> {
+    #[derive(Serialize)]
+    struct NoArgs {}
+    if tauri_invoke_fn().is_some() {
+        return invoke("person", &NoArgs {}).await;
+    }
+    http_json(gloo_net::http::Request::get("/api/person").build()).await
+}
+
+#[derive(Serialize, Deserialize)]
+struct Words {
+    words: String,
+}
+
+/// 24 new recovery words. Nothing is stored anywhere.
+pub async fn new_words() -> ApiResult<String> {
+    #[derive(Serialize)]
+    struct NoArgs {}
+    let w: Words = if tauri_invoke_fn().is_some() {
+        invoke("new_words", &NoArgs {}).await?
+    } else {
+        http_json(gloo_net::http::Request::post("/api/person/words").build()).await?
+    };
+    Ok(w.words)
+}
+
+pub async fn certify(words: String, name: String) -> ApiResult<PersonInfo> {
+    #[derive(Serialize)]
+    struct Args {
+        words: String,
+        name: String,
+    }
+    let args = Args { words, name };
+    if tauri_invoke_fn().is_some() {
+        return invoke("certify", &args).await;
+    }
+    http_json(gloo_net::http::Request::post("/api/person/certify").json(&args)).await
+}
+
+pub async fn revoke(words: String, device: PubKey) -> ApiResult<PersonInfo> {
+    #[derive(Serialize)]
+    struct Args {
+        words: String,
+        device: PubKey,
+    }
+    let args = Args { words, device };
+    if tauri_invoke_fn().is_some() {
+        return invoke("revoke", &args).await;
+    }
+    http_json(gloo_net::http::Request::post("/api/person/revoke").json(&args)).await
+}
+
+/// Mirrors `symbiot_sync::Report`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+pub struct SyncReport {
+    pub sent: usize,
+    pub received: usize,
+}
+
+/// Where syncing with sz stands — only in the app; sz itself is where devices sync.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+pub struct SyncStatus {
+    pub url: Option<String>,
+    pub last_ok_ms: Option<u64>,
+    pub last_error: Option<String>,
+    pub last: Option<SyncReport>,
+}
+
+/// `None` in the browser: the web UI runs on sz, which is the hub.
+pub async fn sync_status() -> ApiResult<Option<SyncStatus>> {
+    #[derive(Serialize)]
+    struct NoArgs {}
+    if tauri_invoke_fn().is_none() {
+        return Ok(None);
+    }
+    invoke("sync_status", &NoArgs {}).await.map(Some)
+}
+
+pub async fn sync_now() -> ApiResult<SyncStatus> {
+    #[derive(Serialize)]
+    struct NoArgs {}
+    invoke("sync_now", &NoArgs {}).await
+}
+
+/// Whether this UI runs inside the app (local data) or in the browser on sz.
+pub fn in_app() -> bool {
+    tauri_invoke_fn().is_some()
 }
 
 /// Mirrors `symbiot_ai::Info` (that crate is native-only).

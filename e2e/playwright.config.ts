@@ -43,6 +43,11 @@ export default defineConfig({
       testMatch: "mitdenken.spec.ts",
       use: { baseURL: "http://127.0.0.1:8103" },
     },
+    {
+      name: "geraete",
+      testMatch: "geraete.spec.ts",
+      use: { baseURL: "http://127.0.0.1:8105" },
+    },
   ],
   webServer: [
     server(8101),
@@ -57,5 +62,6 @@ export default defineConfig({
       SYMBIOT_AI_URL: `http://127.0.0.1:${llmPort}/v1`,
       SYMBIOT_AI_MODEL: "mock",
     }),
+    server(8105),
   ],
 });
