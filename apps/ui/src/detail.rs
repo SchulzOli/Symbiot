@@ -84,6 +84,7 @@ pub fn Detail(
                 <span class=format!("kind kind-{}", node.kind.as_str())>{node.kind.label()}</span>
                 <button class="chip" on:click=move |_| selected.set(None)>"Schließen"</button>
             </div>
+            {node.concurrent.then(|| view! { <Concurrent node=node.clone() on_saved /> })}
             <Edit node=node.clone() on_saved />
             <Sensitive id sensitive on_saved />
             <NodePolicy id policy on_saved />
@@ -94,6 +95,35 @@ pub fn Detail(
             <History id refresh />
             <Delete id policy selected on_saved />
         </aside>
+    }
+}
+
+/// M4: another device changed the node at the same time. The newest version is shown; „Passt
+/// so“ writes it again on top of itself, which clears the mark on every device.
+#[component]
+fn Concurrent(node: Node, on_saved: impl Fn() + Copy + Send + Sync + 'static) -> impl IntoView {
+    let error = RwSignal::new(None::<String>);
+    let (id, title, body) = (node.id, node.title.clone(), node.body.clone());
+    let keep = move |_| {
+        let (title, body) = (title.clone(), body.clone());
+        spawn_local(async move {
+            match api::update_node(id, title, body).await {
+                Ok(_) => on_saved(),
+                Err(e) => error.set(Some(e)),
+            }
+        })
+    };
+    view! {
+        <div class="concurrent-note" data-testid="concurrent">
+            <p>
+                "Gleichzeitig geändert: Ein anderes Gerät hat diesen Knoten bearbeitet, ohne die vorige "
+                "Version zu kennen. Angezeigt wird die neueste, beide stehen im Verlauf."
+            </p>
+            <div class="row end">
+                {move || error.get().map(|e| view! { <span class="error">{e}</span> })}
+                <button class="chip" on:click=keep>"Passt so"</button>
+            </div>
+        </div>
     }
 }
 
@@ -432,6 +462,16 @@ fn History(id: NodeId, refresh: RwSignal<u32>) -> impl IntoView {
         refresh.track();
         api::node_history(id)
     });
+    // M4: which device wrote each version.
+    let people = LocalResource::new(api::person);
+    let device_name = move |key: &symbiot_core::PubKey| {
+        people
+            .get()
+            .and_then(|p| p.ok())
+            .and_then(|p| p.devices.into_iter().find(|d| d.key == *key))
+            .map(|d| d.name)
+            .unwrap_or_else(|| short(&key.to_hex()))
+    };
     view! {
         <h4>"Verlauf"</h4>
         <ol class="history">
@@ -456,7 +496,7 @@ fn History(id: NodeId, refresh: RwSignal<u32>) -> impl IntoView {
                         view! {
                             <li title=e.hash.to_hex()>
                                 <strong>{format!("Version {}", i + 1)}</strong>
-                                {format!(" · {} · {} · Eintrag {} · {}", format_ms(e.head.ts_ms), title, e.head.seq, short(&e.hash.to_hex()))}
+                                {format!(" · {} · {} · {} · Eintrag {} · {}", format_ms(e.head.ts_ms), title, device_name(&e.head.author), e.head.seq, short(&e.hash.to_hex()))}
                             </li>
                         }
                     })

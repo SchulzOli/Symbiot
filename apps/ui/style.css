@@ -198,3 +198,35 @@ button.unlink {
   font-weight: 400; cursor: pointer;
 }
 button.unlink:hover { color: var(--error); }
+
+/* M4 — Geräte, Abgleich, gleichzeitige Änderungen */
+.devices {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+.devices h4 { margin: 0; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.setup, .setup-fresh, .setup-existing { display: grid; gap: 10px; }
+.setup p { margin: 0; }
+.words {
+  margin: 0; padding-left: 2.2rem;
+  columns: 3; column-gap: 1.5rem;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+.device-list { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+.sync { gap: 0.75rem; }
+button.danger-link { color: var(--error); }
+.concurrent {
+  margin-left: 0.4rem; font-size: 0.75rem; color: var(--k-tension);
+  border: 1px solid currentColor; border-radius: 999px; padding: 0 8px;
+}
+.concurrent-note {
+  padding: 0.75rem 1rem;
+  border: 1px dashed var(--k-tension);
+  border-radius: 10px;
+}
+.concurrent-note p { margin: 0 0 0.5rem; }
+@media (max-width: 480px) { .words { columns: 2; } }

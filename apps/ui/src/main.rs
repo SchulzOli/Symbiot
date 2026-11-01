@@ -2,6 +2,7 @@
 
 mod api;
 mod detail;
+mod devices;
 mod graph;
 
 use leptos::prelude::*;
@@ -84,6 +85,7 @@ fn App() -> impl IntoView {
                 }
             }}
             <Verify refresh=version />
+            <devices::Devices refresh=version on_saved=saved />
             <footer>
                 {format!(
                     "Daten: {} · core {} · protocol {} · ",
@@ -206,6 +208,11 @@ fn NodeCard(node: Node, locked: bool, selected: RwSignal<Option<NodeId>>) -> imp
         >
             <span class=format!("kind kind-{}", node.kind.as_str())>{node.kind.label()}</span>
             {locked.then(|| view! { <span class="lock" title="Sensibel – verlässt nie das Heimnetz">"🔒"</span> })}
+            {node.concurrent.then(|| view! {
+                <span class="concurrent" title="Ein anderes Gerät hat den Knoten gleichzeitig geändert. Beide Versionen stehen im Verlauf.">
+                    "gleichzeitig geändert"
+                </span>
+            })}
             <h3>{node.title}</h3>
             {(!node.body.is_empty()).then(|| view! { <p>{node.body.clone()}</p> })}
             <small class="muted" title=node.id.to_hex()>{meta}</small>
@@ -217,12 +224,19 @@ fn NodeCard(node: Node, locked: bool, selected: RwSignal<Option<NodeId>>) -> imp
 #[component]
 fn Verify(refresh: RwSignal<u32>) -> impl IntoView {
     let report = RwSignal::new(None::<Result<VerifyReport, String>>);
+    let others = RwSignal::new(None::<Result<Vec<VerifyReport>, String>>);
     // A new write makes an old verdict stale.
     Effect::new(move |_| {
         refresh.track();
         report.set(None);
+        others.set(None);
     });
-    let check = move |_| spawn_local(async move { report.set(Some(api::verify().await)) });
+    let check = move |_| {
+        spawn_local(async move {
+            report.set(Some(api::verify().await));
+            others.set(Some(api::verify_all().await));
+        })
+    };
 
     view! {
         <section class="verify">
@@ -246,6 +260,21 @@ fn Verify(refresh: RwSignal<u32>) -> impl IntoView {
                 Ok(r) => view! {
                     <span class="error">{format!("✗ {}", r.error.unwrap_or_default())}</span>
                 }.into_any(),
+                Err(e) => view! { <span class="error">{e}</span> }.into_any(),
+            })}
+            // M4: the chains of the other devices known here.
+            {move || others.get().map(|r| match r {
+                Ok(all) if all.len() > 1 => match all.iter().find(|r| !r.ok) {
+                    None => view! {
+                        <span class="ok">{format!("· alle {} Ketten ok", all.len())}</span>
+                    }.into_any(),
+                    Some(bad) => view! {
+                        <span class="error">
+                            {format!("✗ Kette von Gerät {}: {}", short(&bad.device.to_hex()), bad.error.clone().unwrap_or_default())}
+                        </span>
+                    }.into_any(),
+                },
+                Ok(_) => view! { <span></span> }.into_any(),
                 Err(e) => view! { <span class="error">{e}</span> }.into_any(),
             })}
         </section>

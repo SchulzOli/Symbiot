@@ -41,6 +41,20 @@ Der Server fragt LiteLLM nur, wenn `SYMBIOT_AI_URL` gesetzt ist. Ohne KI läuft 
 Die Desktop-App liest dieselben Variablen beim Start. Ins Log schreibt der Server nur Metadaten (Modell,
 Anzahl Quellen, zurückgehaltene sensible Knoten), nie den Inhalt eines Vorschlags.
 
+## Abgleich (M4)
+
+Die Geräte gleichen über sz ab. Auf sz selbst ist nichts einzustellen; die Endpunkte liegen unter `/api/sync`.
+
+1. **sz bestätigen:** `https://sz.tailacb899.ts.net:8449` öffnen, unter „Geräte“ den Personen-Schlüssel
+   anlegen. Die 24 Wörter aufschreiben oder in den Passwort-Manager legen; sie werden nirgends gespeichert.
+2. **Desktop:** `SYMBIOT_SYNC_URL=https://sz.tailacb899.ts.net:8449` setzen und die App starten. Unter „Geräte“
+   „Vorhandenen Schlüssel eingeben“, Namen vergeben. Die App gleicht danach jede Minute ab, oder mit
+   „Jetzt abgleichen“.
+3. **Verlorenes Gerät:** auf einem anderen Gerät unter „Geräte“ widerrufen (braucht die Wörter).
+
+Im Log stehen nur Metadaten (Gerät, Anzahl Einträge), nie Wörter oder Inhalte. Eine Verzweigung (ein
+Geräteschlüssel schreibt zwei Geschichten) wird mit Level `ERROR` geloggt.
+
 ## Einmalig einrichten (von Hand, braucht deine Anmeldungen)
 
 0. **Stack anlegen:** [deploy/install-sz.sh](../deploy/install-sz.sh) mit `compose.yaml` nach sz kopieren und mit sudo starten.
