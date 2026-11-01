@@ -65,7 +65,12 @@ damit: nicht löschbar, solange der Mensch es nicht ändert.
   vor jeder Regel.
 - Sensible Knoten verlassen das Heimnetz nie, auch nicht zur gehosteten KI.
 
-## E5 — Schlüsselverlust und Wiederherstellung · *entschieden (2026-10-31)*
+## E5 — Schlüsselverlust und Wiederherstellung · *entschieden (2026-10-31), umgesetzt in M4*
+
+**Umgesetzt (2026-11-01):** 24 Wörter nach BIP39 (englische Liste), der Personen-Schlüssel wird daraus abgeleitet
+und nie gespeichert. Gerätebestätigung und Widerruf sind Einträge (Kennungen 19 und 20). Freigabe für den Abgleich
+über den Personen-Schlüssel statt einer Liste auf heimserver (entschieden 2026-11-01). Noch offen: verschlüsseltes Backup
+(E6).
 
 Ja, wir brauchen ein Konzept – aber ein kleines. Backups und Umzug auf ein neues Gerät sind der richtige
 Ansatz. Wichtig: Der **Geräteschlüssel wird dabei nicht mit umgezogen.**

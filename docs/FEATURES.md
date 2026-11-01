@@ -52,9 +52,18 @@ Die KI schlägt den nächsten Schritt vor, ich entscheide.
 
 ## F5 — Synchron *(M4)*
 Ein Gedächtnis auf allen Geräten.
-- Geräte melden sich mit ihrem öffentlichen Schlüssel an heimserver an (Freigabeliste).
-- Austausch: „Gib mir alles nach Eintrag N von Kette X“. Fremde Einträge werden vor dem Speichern geprüft.
+- Geräte gehören zu einem **Personen-Schlüssel** (E5, 24 Wörter). Er bestätigt jedes Gerät mit einem signierten
+  Eintrag in dessen Kette (`Op::CertifyDevice`) und widerruft verlorene (`Op::RevokeDevice`). heimserver nimmt nur Ketten
+  von Geräten derselben Person an; ein neues Gerät stellt sich mit seinem ersten Push selbst vor.
+- Austausch über heimserver (Stern): `GET /api/sync/heads`, `GET /api/sync/chains/{gerät}?after=N`,
+  `POST /api/sync/chains/{gerät}`. Jede Anfrage ist mit dem Geräteschlüssel signiert. Fremde Einträge werden vor
+  dem Speichern geprüft (Kette, Anschluss, Person). Eine Verzweigung wird als Beweis gespeichert und abgelehnt.
+- Alle Ketten werden deterministisch gemischt (`replay`): Die neueste Version gewinnt, eine gleichzeitige Änderung
+  zeigt „gleichzeitig geändert“, bis „Passt so“ oder eine neue Version kommt. Löschen gewinnt.
+- Inhalt nicht exportierbarer Knoten verlässt das Gerät nicht; solche Knoten erscheinen woanders nicht.
 - **Fertig, wenn:** Offline am PC angelegte Knoten nach dem Wiederverbinden auf heimserver und auf dem zweiten Gerät erscheinen. Eine manipulierte Kette wird abgelehnt.
+  ✅ `apps/server/tests/sync.rs` (heimserver als echter Server, zwei Geräte), `e2e/tests/geraete.spec.ts` (Einrichtung).
+  Nicht in M4: Checkpoints und `Witness`-Einträge (E13), Verschlüsselung (E6).
 
 ## F6 — Überall *(M5)*
 Symbiot auf dem Handy.

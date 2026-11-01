@@ -166,6 +166,11 @@ fn verify_ledger(store: State<AppStore>) -> Result<VerifyReport, String> {
     store.with(|s| s.verify())
 }
 
+#[tauri::command]
+fn verify_all(store: State<AppStore>) -> Result<Vec<VerifyReport>, String> {
+    store.with(|s| s.verify_all())
+}
+
 #[derive(serde::Serialize)]
 struct PersonInfo {
     device: PubKey,
@@ -329,7 +334,8 @@ pub fn run() {
             certify,
             revoke,
             sync_now,
-            sync_status
+            sync_status,
+            verify_all
         ])
         .run(tauri::generate_context!())
         .expect("error while running Symbiot");
