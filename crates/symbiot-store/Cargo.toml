@@ -9,7 +9,7 @@ repository.workspace = true
 getrandom = "0.4.3"
 postcard = { version = "1.1.3", default-features = false, features = ["alloc"] }
 rusqlite = { version = "0.41.1", features = ["bundled"] }
-symbiot-core = { version = "0.1.0", path = "../symbiot-core" }
+symbiot-core = { version = "0.2.0", path = "../symbiot-core" }
 thiserror = "2.0.21"
 
 [dev-dependencies]

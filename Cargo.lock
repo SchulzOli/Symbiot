@@ -4333,7 +4333,7 @@ dependencies = [
 
 [[package]]
 name = "symbiot-ai"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4344,7 +4344,7 @@ dependencies = [
 
 [[package]]
 name = "symbiot-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ed25519-dalek",
  "hex",
@@ -4357,7 +4357,7 @@ dependencies = [
 
 [[package]]
 name = "symbiot-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "symbiot-ai",
@@ -4369,7 +4369,7 @@ dependencies = [
 
 [[package]]
 name = "symbiot-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "http-body-util",
@@ -4387,7 +4387,7 @@ dependencies = [
 
 [[package]]
 name = "symbiot-store"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "getrandom 0.4.3",
  "postcard",
@@ -4399,7 +4399,7 @@ dependencies = [
 
 [[package]]
 name = "symbiot-ui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "console_error_panic_hook",
  "gloo-net 0.7.0",
