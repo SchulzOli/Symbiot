@@ -379,6 +379,13 @@ impl Signer {
         PubKey(self.key.verifying_key().to_bytes())
     }
 
+    /// Signs a message that is not an entry, e.g. a sync request. The message must start with
+    /// its own domain (like `symbiot/sync-auth/v1`) so it can never pass for an entry hash.
+    pub fn sign_message(&self, message: &[u8]) -> Sig {
+        debug_assert!(message.starts_with(b"symbiot/"), "messages carry a domain");
+        Sig(self.key.sign(message).to_bytes())
+    }
+
     /// Appends `op` after `prev` (the current tip of this device's chain, `None` for the first entry).
     pub fn append(&self, prev: Option<&LedgerEntry>, ts_ms: u64, op: Op) -> LedgerEntry {
         let (kind, params, content) = op.encode();
@@ -487,6 +494,13 @@ impl fmt::Display for VerifyError {
             }
         }
     }
+}
+
+/// Checks a signature made with [`Signer::sign_message`].
+pub fn verify_message(key: &PubKey, message: &[u8], sig: &Sig) -> bool {
+    VerifyingKey::from_bytes(&key.0)
+        .and_then(|k| k.verify_strict(message, &Signature::from_bytes(&sig.0)))
+        .is_ok()
 }
 
 /// Verifies one device's chain from its first entry. Returns the number of entries.

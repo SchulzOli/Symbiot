@@ -5,12 +5,13 @@ use std::sync::{Arc, Mutex};
 
 use symbiot_ai::{Advisor, Info};
 use symbiot_core::{
-    Edge, EdgeId, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal, VerifyReport,
+    Edge, EdgeId, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal, PubKey,
+    VerifyReport,
 };
-use symbiot_store::Store;
+use symbiot_store::{DeviceInfo, Store};
 use tauri::{Manager, State};
 
-struct AppStore(Mutex<Store>);
+struct AppStore(Arc<Mutex<Store>>);
 
 impl AppStore {
     fn with<T>(&self, f: impl FnOnce(&mut Store) -> symbiot_store::Result<T>) -> Result<T, String> {
@@ -165,13 +166,141 @@ fn verify_ledger(store: State<AppStore>) -> Result<VerifyReport, String> {
     store.with(|s| s.verify())
 }
 
+#[derive(serde::Serialize)]
+struct PersonInfo {
+    device: PubKey,
+    person: Option<PubKey>,
+    devices: Vec<DeviceInfo>,
+}
+
+fn person_info(s: &mut Store) -> symbiot_store::Result<PersonInfo> {
+    Ok(PersonInfo {
+        device: s.device(),
+        person: s.person()?,
+        devices: s.devices()?,
+    })
+}
+
+#[tauri::command]
+fn person(store: State<AppStore>) -> Result<PersonInfo, String> {
+    store.with(person_info)
+}
+
+/// E5: 24 new recovery words, shown once and never stored.
+#[derive(serde::Serialize)]
+struct Words {
+    words: String,
+}
+
+#[tauri::command]
+fn new_words() -> Result<Words, String> {
+    symbiot_store::new_words()
+        .map(|words| Words { words })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn certify(store: State<AppStore>, words: String, name: String) -> Result<PersonInfo, String> {
+    store.with(|s| {
+        s.certify_self(&words, &name)?;
+        person_info(s)
+    })
+}
+
+#[tauri::command]
+fn revoke(store: State<AppStore>, words: String, device: PubKey) -> Result<PersonInfo, String> {
+    store.with(|s| {
+        s.revoke_device(&words, device)?;
+        person_info(s)
+    })
+}
+
+/// M4: where syncing with heimserver stands. Shown in the footer.
+#[derive(Clone, Default, serde::Serialize)]
+struct SyncStatus {
+    /// `SYMBIOT_SYNC_URL`, if set.
+    url: Option<String>,
+    last_ok_ms: Option<u64>,
+    last_error: Option<String>,
+    last: Option<symbiot_sync::Report>,
+}
+
+struct Sync {
+    remote: Option<symbiot_sync::Remote>,
+    status: Mutex<SyncStatus>,
+}
+
+impl Sync {
+    /// One round; offline is not a failure of the app, only a status.
+    fn run(&self, store: &Mutex<Store>) -> SyncStatus {
+        let Some(remote) = &self.remote else {
+            return SyncStatus::default();
+        };
+        let result = symbiot_sync::sync(store, remote);
+        let mut status = self.status.lock().unwrap_or_else(|p| p.into_inner());
+        match result {
+            Ok(report) => {
+                status.last_ok_ms = Some(
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0),
+                );
+                status.last_error = None;
+                status.last = Some(report);
+            }
+            Err(e) => status.last_error = Some(e.to_string()),
+        }
+        status.clone()
+    }
+}
+
+#[tauri::command]
+async fn sync_now(
+    store: State<'_, AppStore>,
+    sync: State<'_, Arc<Sync>>,
+) -> Result<SyncStatus, String> {
+    let (store, sync) = (store.0.clone(), sync.inner().clone());
+    tauri::async_runtime::spawn_blocking(move || sync.run(&store))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn sync_status(sync: State<Arc<Sync>>) -> SyncStatus {
+    sync.status
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
-            let store = Store::open_dir(&dir)?;
-            app.manage(AppStore(Mutex::new(store)));
+            let store = Arc::new(Mutex::new(Store::open_dir(&dir)?));
+            app.manage(AppStore(store.clone()));
+            // M4: sync with heimserver every minute if `SYMBIOT_SYNC_URL` is set.
+            let url = std::env::var("SYMBIOT_SYNC_URL")
+                .ok()
+                .filter(|u| !u.is_empty());
+            let sync = Arc::new(Sync {
+                remote: url.as_deref().map(symbiot_sync::Remote::new),
+                status: Mutex::new(SyncStatus {
+                    url,
+                    ..SyncStatus::default()
+                }),
+            });
+            app.manage(sync.clone());
+            if sync.remote.is_some() {
+                std::thread::spawn(move || {
+                    loop {
+                        sync.run(&store);
+                        std::thread::sleep(std::time::Duration::from_secs(60));
+                    }
+                });
+            }
             let ai = symbiot_ai::Config::from_env()
                 .map(|c| Arc::new(symbiot_ai::LiteLlm::new(c)) as Arc<dyn Advisor>);
             app.manage(Ai(ai));
@@ -194,7 +323,13 @@ pub fn run() {
             delete_node,
             node_policy,
             set_policy,
-            unlink_edge
+            unlink_edge,
+            person,
+            new_words,
+            certify,
+            revoke,
+            sync_now,
+            sync_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running Symbiot");

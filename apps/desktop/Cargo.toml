@@ -19,4 +19,5 @@ serde = { version = "1.0.229", features = ["derive"] }
 symbiot-ai = { version = "0.2.0", path = "../../crates/symbiot-ai" }
 symbiot-core = { version = "0.2.0", path = "../../crates/symbiot-core" }
 symbiot-store = { version = "0.2.0", path = "../../crates/symbiot-store" }
+symbiot-sync = { version = "0.2.0", path = "../../crates/symbiot-sync" }
 tauri = { version = "2.12.5", features = [] }
