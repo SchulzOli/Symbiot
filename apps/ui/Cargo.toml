@@ -12,7 +12,7 @@ js-sys = "0.3.107"
 leptos = { version = "0.8.22", features = ["csr"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde-wasm-bindgen = "0.6.5"
-symbiot-core = { version = "0.1.0", path = "../../crates/symbiot-core" }
+symbiot-core = { version = "0.2.0", path = "../../crates/symbiot-core" }
 wasm-bindgen = "0.2.130"
 wasm-bindgen-futures = "0.4.80"
 web-sys = { version = "0.3.107", features = ["Window"] }

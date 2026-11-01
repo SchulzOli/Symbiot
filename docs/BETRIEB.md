@@ -71,9 +71,9 @@ ssh heimserver 'docker inspect --format "{{.State.Health.Status}}" symbiot'
 ## Release
 
 ```bash
-git tag v0.1.0
+git tag v0.2.0
 ```
 ```bash
-git push origin v0.1.0
+git push origin v0.2.0
 ```
 Die Version im Tag muss zur Version in `Cargo.toml` passen (`[workspace.package] version`).
