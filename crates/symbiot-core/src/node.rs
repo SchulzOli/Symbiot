@@ -73,6 +73,9 @@ pub struct Node {
     pub updated_ms: u64,
     /// Hashes of every entry that shaped this node, oldest first — its provenance.
     pub history: Vec<Hash>,
+    /// The current version was written without seeing the one before it (another device
+    /// changed the node meanwhile). Cleared by the next version written on top of it.
+    pub concurrent: bool,
 }
 
 /// Whether a node may be deleted for real and may leave the own devices (E3).
@@ -149,6 +152,8 @@ pub enum Change {
         prune: Vec<Hash>,
     },
     Unlinked(EdgeId),
+    /// A device was certified or revoked (E5): nothing changes in the graph.
+    Device,
     Policy {
         node: NodeId,
         policy: Policy,
@@ -183,13 +188,18 @@ impl Change {
                 created_ms: ts_ms,
                 updated_ms: ts_ms,
                 history: alloc::vec![e.hash],
+                concurrent: false,
             })),
             Op::UpdateNode {
                 node: id,
                 title,
                 body,
+                base,
             } => {
                 let mut n = known(id)?;
+                // Newest wins (the projection applies entries in time order); a version that
+                // did not build on the current one is marked, so the human can look at it.
+                n.concurrent = base.is_some_and(|b| n.history.last() != Some(&b));
                 n.title = title.clone();
                 n.body = body.clone();
                 n.version += 1;
@@ -230,6 +240,7 @@ impl Change {
                         created_ms: ts_ms,
                         updated_ms: ts_ms,
                         history: alloc::vec![e.hash],
+                        concurrent: false,
                     },
                     edge: Edge {
                         id: EdgeId::from_entry_hash(&e.hash),
@@ -246,6 +257,8 @@ impl Change {
                 check_proposal(p, view)?;
                 Ok(Change::Rejected)
             }
+            // Which devices count is decided by `Trust`, not by the graph.
+            Op::CertifyDevice { .. } | Op::RevokeDevice { .. } => Ok(Change::Device),
             Op::MarkSensitive {
                 node: id,
                 sensitive,
@@ -303,9 +316,75 @@ fn check_proposal(p: &Proposal, view: &impl Lookup) -> Result<(), ApplyError> {
     Ok(())
 }
 
+/// The projection built from several chains, see [`replay`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Replay {
+    pub state: State,
+    /// Entries whose content every device removes (deleted, deletable nodes).
+    pub prune: Vec<Hash>,
+    /// Validly signed entries that do not apply, e.g. an update of a node deleted elsewhere.
+    pub skipped: Vec<Hash>,
+}
+
+/// Builds the projection from the chains of several devices (M4). The result is the same on
+/// every device, whatever order the chains arrived in:
+/// - Each chain keeps its own order. Among the next entries of all chains, the one with the
+///   smallest `(ts_ms, author)` goes first — so the newest version of a node wins.
+/// - An entry whose node or edge is not known yet (written on another device whose clock is
+///   behind) waits until something else changes, then is tried again.
+/// - Only when every remaining entry waits, the earliest one is given up (`skipped`).
+///
+/// `accepts` decides which entries count at all (see [`crate::Trust::accepts`]).
+pub fn replay(chains: &[&[LedgerEntry]], accepts: impl Fn(&PubKey, u64) -> bool) -> Replay {
+    let mut out = Replay::default();
+    let mut next = alloc::vec![0usize; chains.len()];
+    let mut waiting = alloc::vec![false; chains.len()];
+    let head = |next: &[usize], c: usize| chains[c].get(next[c]);
+    let earliest = |next: &[usize], waiting: &[bool], skip_waiting: bool| {
+        (0..chains.len())
+            .filter(|&c| !(skip_waiting && waiting[c]))
+            .filter_map(|c| head(next, c).map(|e| (c, (e.head.ts_ms, e.head.author))))
+            .min_by_key(|(_, key)| *key)
+            .map(|(c, _)| c)
+    };
+    loop {
+        let Some(c) = earliest(&next, &waiting, true) else {
+            match earliest(&next, &waiting, false) {
+                Some(c) => {
+                    out.skipped.push(chains[c][next[c]].hash);
+                    next[c] += 1;
+                    waiting.fill(false);
+                    continue;
+                }
+                None => break,
+            }
+        };
+        let e = &chains[c][next[c]];
+        if !accepts(&e.head.author, e.head.seq) {
+            next[c] += 1;
+            continue;
+        }
+        match out.state.apply(e) {
+            Ok(change) => {
+                if let Change::Deleted { prune, .. } = change {
+                    out.prune.extend(prune);
+                }
+                next[c] += 1;
+                waiting.fill(false);
+            }
+            Err(ApplyError::UnknownNode(_) | ApplyError::UnknownEdge(_)) => waiting[c] = true,
+            Err(_) => {
+                out.skipped.push(e.hash);
+                next[c] += 1;
+            }
+        }
+    }
+    out
+}
+
 /// In-memory projection of verified entries — used by tests and small devices.
 /// Apps with storage keep the same projection in SQLite.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct State {
     pub nodes: BTreeMap<NodeId, Node>,
     pub edges: BTreeMap<EdgeId, Edge>,
@@ -348,7 +427,7 @@ impl State {
                 self.nodes.insert(node.id, node.clone());
                 self.edges.insert(edge.id, edge.clone());
             }
-            Change::Rejected => {}
+            Change::Rejected | Change::Device => {}
             Change::Sensitivity { node, sensitive } => {
                 if *sensitive {
                     self.sensitive.insert(*node);
@@ -402,6 +481,7 @@ mod tests {
                 node: id,
                 title: "Laufen, 3x pro Woche".into(),
                 body: String::new(),
+                base: None,
             },
         );
 
@@ -425,6 +505,7 @@ mod tests {
                 node: NodeId([0; 16]),
                 title: String::new(),
                 body: String::new(),
+                base: None,
             },
         );
         assert!(State::default().apply(&u).is_err());
@@ -626,6 +707,7 @@ mod tests {
                 node: a.id,
                 title: "Ziel 2".into(),
                 body: String::new(),
+                base: None,
             },
         ));
         let Ok(Change::Edge(edge)) = push(
@@ -690,7 +772,8 @@ mod tests {
                 Op::UpdateNode {
                     node: a.id,
                     title: "zurück".into(),
-                    body: String::new()
+                    body: String::new(),
+                    base: None,
                 }
             ),
             Err(ApplyError::UnknownNode(a.id))
@@ -739,5 +822,134 @@ mod tests {
         st.apply(&loose).unwrap();
         assert_eq!(st.policy(&id), Policy::default());
         assert!(st.policies.is_empty());
+    }
+
+    fn update(node: NodeId, title: &str, base: &LedgerEntry) -> Op {
+        Op::UpdateNode {
+            node,
+            title: title.into(),
+            body: String::new(),
+            base: Some(base.hash),
+        }
+    }
+
+    /// M4: two devices change the same node while apart. Newest wins on every device, the
+    /// node is marked, and a version written on top of it clears the mark.
+    #[test]
+    fn replay_newest_wins_and_marks_concurrent_edits() {
+        let pc = Signer::from_seed([11; 32]);
+        let heimserver = Signer::from_seed([12; 32]);
+        let create = pc.append(
+            None,
+            100,
+            Op::CreateNode {
+                kind: NodeKind::Goal,
+                title: "Laufen".into(),
+                body: String::new(),
+            },
+        );
+        let id = NodeId::from_entry_hash(&create.hash);
+        // heimserver's clock is behind: its edit carries an earlier time than the node itself.
+        let sz_edit = heimserver.append(None, 50, update(id, "Laufen (heimserver)", &create));
+        let pc_edit = pc.append(Some(&create), 200, update(id, "Laufen (PC)", &create));
+        let pc_chain = alloc::vec![create.clone(), pc_edit.clone()];
+        let sz_chain = alloc::vec![sz_edit.clone()];
+
+        let all = |_: &PubKey, _: u64| true;
+        let a = replay(&[&pc_chain, &sz_chain], all);
+        let b = replay(&[&sz_chain, &pc_chain], all);
+        assert_eq!(a, b, "same result whatever order the chains arrive in");
+        let n = &a.state.nodes[&id];
+        assert_eq!(n.title, "Laufen (PC)", "newest wins");
+        assert!(n.concurrent);
+        assert_eq!(
+            n.history,
+            alloc::vec![create.hash, sz_edit.hash, pc_edit.hash]
+        );
+        assert!(a.skipped.is_empty());
+
+        // „Passt so“: a version on top of the current one clears the mark.
+        let ok = pc.append(Some(&pc_edit), 300, update(id, "Laufen (PC)", &pc_edit));
+        let pc_chain = alloc::vec![create, pc_edit, ok];
+        let c = replay(&[&pc_chain, &sz_chain], all);
+        assert!(!c.state.nodes[&id].concurrent);
+    }
+
+    #[test]
+    fn replay_is_independent_of_chain_order() {
+        let devices = [
+            Signer::from_seed([21; 32]),
+            Signer::from_seed([22; 32]),
+            Signer::from_seed([23; 32]),
+        ];
+        let create = |s: &Signer, ts: u64, title: &str| {
+            s.append(
+                None,
+                ts,
+                Op::CreateNode {
+                    kind: NodeKind::Goal,
+                    title: title.into(),
+                    body: String::new(),
+                },
+            )
+        };
+        let a0 = create(&devices[0], 10, "A");
+        let b0 = create(&devices[1], 20, "B");
+        let a = NodeId::from_entry_hash(&a0.hash);
+        let b = NodeId::from_entry_hash(&b0.hash);
+        let a1 = devices[0].append(
+            Some(&a0),
+            40,
+            Op::Link {
+                from: a,
+                to: b,
+                kind: EdgeKind::RelatesTo,
+            },
+        );
+        let b1 = devices[1].append(Some(&b0), 30, update(a, "A von B", &a0));
+        let c0 = devices[2].append(None, 35, Op::DeleteNode { node: b });
+        let c1 = devices[2].append(Some(&c0), 36, update(b, "zu spät", &b0));
+        let chains = [
+            alloc::vec![a0, a1],
+            alloc::vec![b0, b1],
+            alloc::vec![c0, c1.clone()],
+        ];
+
+        let all = |_: &PubKey, _: u64| true;
+        let reference = replay(&[&chains[0], &chains[1], &chains[2]], all);
+        for order in [[0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]] {
+            let r = replay(
+                &[&chains[order[0]], &chains[order[1]], &chains[order[2]]],
+                all,
+            );
+            assert_eq!(r, reference, "{order:?}");
+        }
+        // B was deleted at 35: the link at 40 and the edit at 36 no longer apply.
+        assert_eq!(reference.state.nodes.len(), 1);
+        assert_eq!(reference.state.nodes[&a].title, "A von B");
+        assert!(reference.state.edges.is_empty());
+        assert_eq!(reference.skipped.len(), 2);
+        assert!(reference.skipped.contains(&c1.hash));
+        assert_eq!(reference.prune, alloc::vec![chains[1][0].hash]);
+    }
+
+    #[test]
+    fn replay_ignores_entries_that_do_not_count() {
+        let mine = Signer::from_seed([31; 32]);
+        let stranger = Signer::from_seed([32; 32]);
+        let op = |title: &str| Op::CreateNode {
+            kind: NodeKind::Goal,
+            title: title.into(),
+            body: String::new(),
+        };
+        let my_chain = alloc::vec![mine.append(None, 1, op("meins"))];
+        let their_chain = alloc::vec![stranger.append(None, 2, op("fremd"))];
+        let me = mine.public();
+        let r = replay(&[&my_chain, &their_chain], |author, _| *author == me);
+        assert_eq!(r.state.nodes.len(), 1);
+        assert!(
+            r.skipped.is_empty(),
+            "not counting is not the same as failing"
+        );
     }
 }

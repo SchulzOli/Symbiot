@@ -11,12 +11,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use symbiot_core::{
-    ApplyError, Change, Edge, EdgeId, EdgeKind, Hash, LedgerEntry, Lookup, Node, NodeId, NodeKind,
-    Op, Policy, Proposal, PubKey, Sig, Signer,
+    ApplyError, Change, Edge, EdgeId, EdgeKind, Hash, Head, LedgerEntry, Lookup, Node, NodeId,
+    NodeKind, Op, Policy, Proposal, PubKey, Sig, Signer, replay,
 };
 
 /// `PRAGMA user_version` of the current schema. 0 with an `entry` column is the v1 format.
-const SCHEMA_VERSION: i64 = 2;
+/// 3: nodes carry `concurrent` (M4); the projection is rebuilt from the ledger on upgrade.
+const SCHEMA_VERSION: i64 = 3;
 
 pub use symbiot_core::VerifyReport;
 
@@ -154,6 +155,12 @@ impl Store {
                  exportable INTEGER NOT NULL
              );",
         )?;
+        if version > 0 && version < SCHEMA_VERSION {
+            // Only the projection changed shape; the ledger is the truth.
+            let tx = conn.unchecked_transaction()?;
+            rebuild_projection(&tx)?;
+            tx.commit()?;
+        }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(Store {
             conn,
@@ -211,10 +218,14 @@ impl Store {
         if title.is_empty() {
             return Err(Error::Invalid("Titel darf nicht leer sein"));
         }
+        // The version being edited: if another device changed the node meanwhile, the
+        // projection marks the result as concurrent (M4).
+        let base = self.node(id)?.and_then(|n| n.history.last().copied());
         match self.append(Op::UpdateNode {
             node: id,
             title: title.into(),
             body: body.into(),
+            base,
         })? {
             Change::Node(n) => Ok(n),
             _ => unreachable!("UpdateNode yields a node"),
@@ -360,7 +371,10 @@ fn append_in(tx: &Connection, signer: &Signer, op: Op) -> Result<Change> {
     // Load what the core rules need, then let the core decide (same rules on every platform).
     let mut known = Known::default();
     let referenced: Vec<NodeId> = match &op {
-        Op::CreateNode { .. } | Op::Unlink { .. } => vec![],
+        Op::CreateNode { .. }
+        | Op::Unlink { .. }
+        | Op::CertifyDevice { .. }
+        | Op::RevokeDevice { .. } => vec![],
         Op::UpdateNode { node, .. }
         | Op::MarkSensitive { node, .. }
         | Op::DeleteNode { node }
@@ -384,7 +398,7 @@ fn append_in(tx: &Connection, signer: &Signer, op: Op) -> Result<Change> {
         _ => {}
     }
 
-    let entry = signer.append(tip.as_ref(), now_ms(), op);
+    let entry = signer.append(tip.as_ref(), next_ts(tx)?, op);
     let change = Change::of(&entry, &known).map_err(|e| match e {
         ApplyError::UnknownNode(id) => Error::UnknownNode(id),
         ApplyError::UnknownEdge(id) => Error::UnknownEdge(id),
@@ -430,7 +444,7 @@ fn project(tx: &Connection, change: &Change) -> Result<()> {
             write_node(tx, node)?;
             write_edge(tx, edge)?;
         }
-        Change::Rejected => {}
+        Change::Rejected | Change::Device => {}
         Change::Sensitivity {
             node,
             sensitive: true,
@@ -530,6 +544,75 @@ impl Store {
     pub fn verify(&self) -> Result<VerifyReport> {
         Ok(VerifyReport::of(self.device(), &self.entries()?))
     }
+}
+
+/// The time for a new entry: now, but never before anything already in the ledger. Then a new
+/// local entry is also the newest in the merged order of all chains (see `symbiot_core::replay`),
+/// even if another device's clock runs ahead — so the incremental projection stays the same as
+/// a full rebuild.
+fn next_ts(conn: &Connection) -> Result<u64> {
+    // Every chain is written this way, so its tip holds its newest time.
+    let mut stmt = conn.prepare(
+        "SELECT head FROM ledger AS l
+         WHERE seq = (SELECT MAX(seq) FROM ledger WHERE author = l.author)",
+    )?;
+    let tips = stmt.query_map([], |r| r.get::<_, Vec<u8>>(0))?;
+    let mut newest = None;
+    for head in tips {
+        let ts = postcard::from_bytes::<Head>(&head?)?.ts_ms;
+        newest = newest.max(Some(ts));
+    }
+    Ok(now_ms().max(newest.map_or(0, |t| t + 1)))
+}
+
+/// Builds the projection tables again from every chain in the ledger.
+fn rebuild_projection(tx: &Connection) -> Result<()> {
+    let mut chains: Vec<Vec<LedgerEntry>> = Vec::new();
+    {
+        let mut stmt =
+            tx.prepare("SELECT head, hash, sig, content FROM ledger ORDER BY author, seq")?;
+        let rows = stmt.query_map([], raw_entry)?;
+        for row in rows {
+            let e = decode_entry(row?)?;
+            match chains.last_mut() {
+                Some(c) if c[0].head.author == e.head.author => c.push(e),
+                _ => chains.push(vec![e]),
+            }
+        }
+    }
+    let refs: Vec<&[LedgerEntry]> = chains.iter().map(Vec::as_slice).collect();
+    let r = replay(&refs, |_, _| true);
+    tx.execute_batch(
+        "DELETE FROM nodes; DELETE FROM edges; DELETE FROM sensitive; DELETE FROM policies;",
+    )?;
+    for node in r.state.nodes.values() {
+        write_node(tx, node)?;
+    }
+    for edge in r.state.edges.values() {
+        write_edge(tx, edge)?;
+    }
+    for id in &r.state.sensitive {
+        tx.execute(
+            "INSERT INTO sensitive (node_id) VALUES (?1)",
+            [id.0.as_slice()],
+        )?;
+    }
+    for (id, p) in &r.state.policies {
+        project(
+            tx,
+            &Change::Policy {
+                node: *id,
+                policy: *p,
+            },
+        )?;
+    }
+    for h in &r.prune {
+        tx.execute(
+            "UPDATE ledger SET content = NULL WHERE hash = ?1",
+            [h.0.as_slice()],
+        )?;
+    }
+    Ok(())
 }
 
 /// A v1 database: no schema version yet, and the whole entry in one `entry` column.
@@ -985,5 +1068,39 @@ mod tests {
             Err(Error::UnknownNode(_))
         ));
         assert!(s.verify().unwrap().ok);
+    }
+
+    /// Opening an older v2 database rebuilds the projection from the ledger (schema 3, M4).
+    #[test]
+    fn upgrade_rebuilds_the_projection() {
+        let dir = tempfile::tempdir().unwrap();
+        let (goal, edge) = {
+            let mut s = Store::open_dir(dir.path()).unwrap();
+            let goal = s.create_node(NodeKind::Goal, "Laufen", "").unwrap();
+            let proof = s.create_node(NodeKind::Evidence, "5 km", "").unwrap();
+            let goal = s.update_node(goal.id, "Laufen 3x", "").unwrap();
+            let edge = s.link(proof.id, goal.id, EdgeKind::Supports).unwrap();
+            s.set_sensitive(proof.id, true).unwrap();
+            s.conn
+                .execute_batch("DELETE FROM nodes; DELETE FROM edges; PRAGMA user_version = 2;")
+                .unwrap();
+            (goal, edge)
+        };
+        let s = Store::open_dir(dir.path()).unwrap();
+        assert_eq!(s.node(goal.id).unwrap(), Some(goal));
+        assert_eq!(s.edges().unwrap(), vec![edge]);
+        assert_eq!(s.sensitive_nodes().unwrap().len(), 1);
+        assert!(s.verify().unwrap().ok);
+    }
+
+    #[test]
+    fn entry_times_never_go_backwards() {
+        let mut s = store();
+        for i in 0..5 {
+            s.create_node(NodeKind::Goal, &format!("Ziel {i}"), "")
+                .unwrap();
+        }
+        let ts: Vec<u64> = s.entries().unwrap().iter().map(|e| e.head.ts_ms).collect();
+        assert!(ts.windows(2).all(|w| w[0] < w[1]), "{ts:?}");
     }
 }
