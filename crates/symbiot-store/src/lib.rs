@@ -11,14 +11,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use symbiot_core::{
-    ApplyError, Change, Edge, EdgeId, EdgeKind, Hash, LedgerEntry, Lookup, Node, NodeId, NodeKind,
-    Op, Policy, Proposal, PubKey, Sig, Signer,
+    ApplyError, Change, Edge, EdgeId, EdgeKind, Hash, Head, LedgerEntry, Lookup, Node, NodeId,
+    NodeKind, Op, Policy, Proposal, PubKey, Sig, Signer, Trust, replay,
 };
 
 /// `PRAGMA user_version` of the current schema. 0 with an `entry` column is the v1 format.
-const SCHEMA_VERSION: i64 = 2;
+/// 3: nodes carry `concurrent` (M4); the projection is rebuilt from the ledger on upgrade.
+const SCHEMA_VERSION: i64 = 3;
+
+mod sync;
 
 pub use symbiot_core::VerifyReport;
+pub use sync::{ChainHead, DeviceInfo, new_words};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -32,6 +36,15 @@ pub enum Error {
     UnknownNode(NodeId),
     #[error("Verbindung {0} existiert nicht")]
     UnknownEdge(EdgeId),
+    /// A chain from another device that does not verify or does not attach.
+    #[error("Kette abgelehnt: {0}")]
+    BadChain(String),
+    /// The device does not belong to the person of this device (or is revoked).
+    #[error("Gerät gehört nicht zu diesem Personen-Schlüssel")]
+    Untrusted,
+    /// Two validly signed entries at the same position: the device key was used twice.
+    #[error("Verzweigung in der Kette von {author} bei Eintrag {seq}")]
+    Fork { author: PubKey, seq: u64 },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -152,8 +165,21 @@ impl Store {
                  node_id    BLOB PRIMARY KEY,
                  deletable  INTEGER NOT NULL,
                  exportable INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS forks (
+                 author BLOB NOT NULL,
+                 seq    INTEGER NOT NULL,
+                 hash   BLOB NOT NULL,
+                 entry  BLOB NOT NULL,
+                 PRIMARY KEY (author, seq, hash)
              );",
         )?;
+        if version > 0 && version < SCHEMA_VERSION {
+            // Only the projection changed shape; the ledger is the truth.
+            let tx = conn.unchecked_transaction()?;
+            rebuild_projection(&tx, &signer.public())?;
+            tx.commit()?;
+        }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(Store {
             conn,
@@ -165,6 +191,11 @@ impl Store {
     /// This device's identity.
     pub fn device(&self) -> PubKey {
         self.signer.public()
+    }
+
+    /// Signs a request to another device with this device's key (M4 sync).
+    pub fn sign_message(&self, message: &[u8]) -> Sig {
+        self.signer.sign_message(message)
     }
 
     pub fn create_node(&mut self, kind: NodeKind, title: &str, body: &str) -> Result<Node> {
@@ -211,10 +242,14 @@ impl Store {
         if title.is_empty() {
             return Err(Error::Invalid("Titel darf nicht leer sein"));
         }
+        // The version being edited: if another device changed the node meanwhile, the
+        // projection marks the result as concurrent (M4).
+        let base = self.node(id)?.and_then(|n| n.history.last().copied());
         match self.append(Op::UpdateNode {
             node: id,
             title: title.into(),
             body: body.into(),
+            base,
         })? {
             Change::Node(n) => Ok(n),
             _ => unreachable!("UpdateNode yields a node"),
@@ -360,7 +395,10 @@ fn append_in(tx: &Connection, signer: &Signer, op: Op) -> Result<Change> {
     // Load what the core rules need, then let the core decide (same rules on every platform).
     let mut known = Known::default();
     let referenced: Vec<NodeId> = match &op {
-        Op::CreateNode { .. } | Op::Unlink { .. } => vec![],
+        Op::CreateNode { .. }
+        | Op::Unlink { .. }
+        | Op::CertifyDevice { .. }
+        | Op::RevokeDevice { .. } => vec![],
         Op::UpdateNode { node, .. }
         | Op::MarkSensitive { node, .. }
         | Op::DeleteNode { node }
@@ -384,7 +422,7 @@ fn append_in(tx: &Connection, signer: &Signer, op: Op) -> Result<Change> {
         _ => {}
     }
 
-    let entry = signer.append(tip.as_ref(), now_ms(), op);
+    let entry = signer.append(tip.as_ref(), next_ts(tx)?, op);
     let change = Change::of(&entry, &known).map_err(|e| match e {
         ApplyError::UnknownNode(id) => Error::UnknownNode(id),
         ApplyError::UnknownEdge(id) => Error::UnknownEdge(id),
@@ -397,11 +435,17 @@ fn append_in(tx: &Connection, signer: &Signer, op: Op) -> Result<Change> {
         ApplyError::Undecodable(_) => Error::Invalid("Eintrag nicht lesbar"),
     })?;
 
+    insert_entry(tx, &entry)?;
+    project(tx, &change)?;
+    Ok(change)
+}
+
+fn insert_entry(tx: &Connection, entry: &LedgerEntry) -> Result<()> {
     tx.execute(
         "INSERT INTO ledger (author, seq, hash, sig, head, content)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
-            author.0.as_slice(),
+            entry.head.author.0.as_slice(),
             entry.head.seq as i64,
             entry.hash.0.as_slice(),
             entry.sig.0.as_slice(),
@@ -413,8 +457,31 @@ fn append_in(tx: &Connection, signer: &Signer, op: Op) -> Result<Change> {
                 .transpose()?
         ],
     )?;
-    project(tx, &change)?;
-    Ok(change)
+    Ok(())
+}
+
+/// One device's chain as stored, oldest first.
+fn chain_of(conn: &Connection, author: &PubKey) -> Result<Vec<LedgerEntry>> {
+    let mut stmt =
+        conn.prepare("SELECT head, hash, sig, content FROM ledger WHERE author = ?1 ORDER BY seq")?;
+    let rows = stmt.query_map([author.0.as_slice()], raw_entry)?;
+    rows.map(|r| decode_entry(r?)).collect()
+}
+
+/// Every chain in the ledger, each oldest first.
+fn all_chains(conn: &Connection) -> Result<Vec<Vec<LedgerEntry>>> {
+    let mut chains: Vec<Vec<LedgerEntry>> = Vec::new();
+    let mut stmt =
+        conn.prepare("SELECT head, hash, sig, content FROM ledger ORDER BY author, seq")?;
+    let rows = stmt.query_map([], raw_entry)?;
+    for row in rows {
+        let e = decode_entry(row?)?;
+        match chains.last_mut() {
+            Some(c) if c[0].head.author == e.head.author => c.push(e),
+            _ => chains.push(vec![e]),
+        }
+    }
+    Ok(chains)
 }
 
 /// Applies a change to the projection tables — the SQLite twin of `State::apply`.
@@ -430,7 +497,7 @@ fn project(tx: &Connection, change: &Change) -> Result<()> {
             write_node(tx, node)?;
             write_edge(tx, edge)?;
         }
-        Change::Rejected => {}
+        Change::Rejected | Change::Device => {}
         Change::Sensitivity {
             node,
             sensitive: true,
@@ -530,6 +597,96 @@ impl Store {
     pub fn verify(&self) -> Result<VerifyReport> {
         Ok(VerifyReport::of(self.device(), &self.entries()?))
     }
+
+    /// Every chain known here, this device's first (M4).
+    pub fn verify_all(&self) -> Result<Vec<VerifyReport>> {
+        let me = self.device();
+        let mut reports: Vec<VerifyReport> = all_chains(&self.conn)?
+            .iter()
+            .map(|c| VerifyReport::of(c[0].head.author, c))
+            .collect();
+        reports.sort_by_key(|r| r.device != me);
+        Ok(reports)
+    }
+}
+
+/// The time for a new entry: now, but never before anything already in the ledger. Then a new
+/// local entry is also the newest in the merged order of all chains (see `symbiot_core::replay`),
+/// even if another device's clock runs ahead — so the incremental projection stays the same as
+/// a full rebuild.
+fn next_ts(conn: &Connection) -> Result<u64> {
+    // Every chain is written this way, so its tip holds its newest time.
+    let mut stmt = conn.prepare(
+        "SELECT head FROM ledger AS l
+         WHERE seq = (SELECT MAX(seq) FROM ledger WHERE author = l.author)",
+    )?;
+    let tips = stmt.query_map([], |r| r.get::<_, Vec<u8>>(0))?;
+    let mut newest = None;
+    for head in tips {
+        let ts = postcard::from_bytes::<Head>(&head?)?.ts_ms;
+        newest = newest.max(Some(ts));
+    }
+    Ok(now_ms().max(newest.map_or(0, |t| t + 1)))
+}
+
+/// Builds the projection tables again from every chain in the ledger.
+/// Only this device's chain and those of devices of the same person (E5) count.
+fn rebuild_projection(tx: &Connection, me: &PubKey) -> Result<()> {
+    let chains = all_chains(tx)?;
+    let refs: Vec<&[LedgerEntry]> = chains.iter().map(Vec::as_slice).collect();
+    let person = refs
+        .iter()
+        .find(|c| c[0].head.author == *me)
+        .and_then(|c| Trust::person_of(c));
+    let trust = person.map(|p| Trust::of(p, refs.iter().copied()));
+    let mut r = replay(&refs, |author, seq| {
+        author == me || trust.as_ref().is_some_and(|t| t.accepts(author, seq))
+    });
+    // E3/E5: a node that is not exportable lives only on the device that made it. Its head
+    // arrives here (the chain must stay whole), its content does not — so it is not shown.
+    let elsewhere: Vec<NodeId> = r
+        .state
+        .policies
+        .iter()
+        .filter(|(id, p)| !p.exportable && r.state.nodes.get(id).is_some_and(|n| n.author != *me))
+        .map(|(id, _)| *id)
+        .collect();
+    for id in &elsewhere {
+        r.state.nodes.remove(id);
+        r.state.edges.retain(|_, e| e.from != *id && e.to != *id);
+        r.state.sensitive.remove(id);
+    }
+    tx.execute_batch(
+        "DELETE FROM nodes; DELETE FROM edges; DELETE FROM sensitive; DELETE FROM policies;",
+    )?;
+    for node in r.state.nodes.values() {
+        write_node(tx, node)?;
+    }
+    for edge in r.state.edges.values() {
+        write_edge(tx, edge)?;
+    }
+    for id in &r.state.sensitive {
+        tx.execute(
+            "INSERT INTO sensitive (node_id) VALUES (?1)",
+            [id.0.as_slice()],
+        )?;
+    }
+    for (id, p) in &r.state.policies {
+        project(
+            tx,
+            &Change::Policy {
+                node: *id,
+                policy: *p,
+            },
+        )?;
+    }
+    for h in &r.prune {
+        tx.execute(
+            "UPDATE ledger SET content = NULL WHERE hash = ?1",
+            [h.0.as_slice()],
+        )?;
+    }
+    Ok(())
 }
 
 /// A v1 database: no schema version yet, and the whole entry in one `entry` column.
@@ -985,5 +1142,68 @@ mod tests {
             Err(Error::UnknownNode(_))
         ));
         assert!(s.verify().unwrap().ok);
+    }
+
+    /// Opening an older v2 database rebuilds the projection from the ledger (schema 3, M4).
+    #[test]
+    fn upgrade_rebuilds_the_projection() {
+        let dir = tempfile::tempdir().unwrap();
+        let (goal, edge) = {
+            let mut s = Store::open_dir(dir.path()).unwrap();
+            let goal = s.create_node(NodeKind::Goal, "Laufen", "").unwrap();
+            let proof = s.create_node(NodeKind::Evidence, "5 km", "").unwrap();
+            let goal = s.update_node(goal.id, "Laufen 3x", "").unwrap();
+            let edge = s.link(proof.id, goal.id, EdgeKind::Supports).unwrap();
+            s.set_sensitive(proof.id, true).unwrap();
+            s.conn
+                .execute_batch("DELETE FROM nodes; DELETE FROM edges; PRAGMA user_version = 2;")
+                .unwrap();
+            (goal, edge)
+        };
+        let s = Store::open_dir(dir.path()).unwrap();
+        assert_eq!(s.node(goal.id).unwrap(), Some(goal));
+        assert_eq!(s.edges().unwrap(), vec![edge]);
+        assert_eq!(s.sensitive_nodes().unwrap().len(), 1);
+        assert!(s.verify().unwrap().ok);
+    }
+
+    #[test]
+    fn entry_times_never_go_backwards() {
+        let mut s = store();
+        for i in 0..5 {
+            s.create_node(NodeKind::Goal, &format!("Ziel {i}"), "")
+                .unwrap();
+        }
+        let ts: Vec<u64> = s.entries().unwrap().iter().map(|e| e.head.ts_ms).collect();
+        assert!(ts.windows(2).all(|w| w[0] < w[1]), "{ts:?}");
+    }
+
+    /// E5: the same words always give the same person; a device cannot be taken over.
+    #[test]
+    fn a_device_belongs_to_one_person() {
+        let words = new_words().unwrap();
+        assert_eq!(words.split_whitespace().count(), 24);
+        let mut s = store();
+        assert_eq!(s.person().unwrap(), None);
+        assert!(s.devices().unwrap().is_empty());
+        let person = s.certify_self(&words.to_uppercase(), "PC").unwrap();
+        assert_eq!(
+            s.certify_self(&words, "PC").unwrap(),
+            person,
+            "repeating is harmless"
+        );
+        assert_eq!(s.entries().unwrap().len(), 1);
+        assert!(matches!(
+            s.certify_self(&new_words().unwrap(), "PC"),
+            Err(Error::Invalid(_))
+        ));
+        assert!(matches!(
+            s.certify_self("eins zwei drei", "PC"),
+            Err(Error::Invalid(_))
+        ));
+        let devices = s.devices().unwrap();
+        assert_eq!(devices.len(), 1);
+        assert!(devices[0].this_device && devices[0].name == "PC");
+        assert!(s.trusts(&s.device()).unwrap());
     }
 }

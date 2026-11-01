@@ -13,15 +13,17 @@ pub mod kind;
 mod ledger;
 pub mod merkle;
 mod node;
+mod person;
 mod proposal;
 
 pub use bytes::{Blob, EdgeId, Hash, NodeId, PubKey, Salt, Sig};
 pub use edge::{Edge, EdgeKind};
 pub use ledger::{
     ContentRef, Decode, Head, LedgerEntry, Op, Part, Signer, VerifyError, VerifyReport,
-    build_chain, verify_chain,
+    build_chain, verify_chain, verify_message,
 };
-pub use node::{ApplyError, Change, Lookup, Node, NodeKind, Policy, State};
+pub use node::{ApplyError, Change, Lookup, Node, NodeKind, Policy, Replay, State, replay};
+pub use person::{Device, Person, Trust};
 pub use proposal::Proposal;
 
 /// Version of the ledger/sync wire format. Bumped on any breaking change,
