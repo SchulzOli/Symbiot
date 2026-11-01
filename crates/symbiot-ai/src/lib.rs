@@ -380,6 +380,7 @@ mod tests {
             created_ms: i as u64,
             updated_ms: i as u64,
             history: vec![Hash([i; 32])],
+            concurrent: false,
         }
     }
 

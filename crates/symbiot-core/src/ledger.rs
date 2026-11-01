@@ -42,6 +42,10 @@ pub enum Op {
         node: NodeId,
         title: String,
         body: String,
+        /// The version that was edited (last hash in the node's history). Another device may
+        /// have changed the node meanwhile — then this update is concurrent (M4).
+        /// `None` in entries written before M4.
+        base: Option<Hash>,
     },
     Link {
         from: NodeId,
@@ -67,6 +71,21 @@ pub enum Op {
         deletable: bool,
         exportable: bool,
     },
+    /// The person confirms a device (E5): „this device is mine“. Stands in the device's own chain.
+    CertifyDevice {
+        device: PubKey,
+        name: String,
+        person: PubKey,
+        /// Person's signature, see [`crate::Person::certify`].
+        sig: Sig,
+    },
+    /// The person revokes a lost device: its entries after `last_seq` no longer count.
+    RevokeDevice {
+        device: PubKey,
+        last_seq: u64,
+        person: PubKey,
+        sig: Sig,
+    },
 }
 
 fn enc<T: Serialize + ?Sized>(v: &T) -> Vec<u8> {
@@ -87,8 +106,18 @@ impl Op {
                 title,
                 body,
             } => (kind::CREATE_NODE, enc(k), Some(enc(&(title, body)))),
-            Op::UpdateNode { node, title, body } => {
-                (kind::UPDATE_NODE, enc(node), Some(enc(&(title, body))))
+            Op::UpdateNode {
+                node,
+                title,
+                body,
+                base,
+            } => {
+                // Without a base the params stay as before M4, so old hashes keep their meaning.
+                let params = match base {
+                    Some(b) => enc(&(node, b)),
+                    None => enc(node),
+                };
+                (kind::UPDATE_NODE, params, Some(enc(&(title, body))))
             }
             Op::Link { from, to, kind: k } => (kind::LINK, enc(&(from, to, k)), None),
             Op::AcceptProposal { proposal: p } => (
@@ -111,6 +140,26 @@ impl Op {
                 deletable,
                 exportable,
             } => (kind::SET_POLICY, enc(&(node, deletable, exportable)), None),
+            Op::CertifyDevice {
+                device,
+                name,
+                person,
+                sig,
+            } => (
+                kind::CERTIFY_DEVICE,
+                enc(&(device, name, person, sig)),
+                None,
+            ),
+            Op::RevokeDevice {
+                device,
+                last_seq,
+                person,
+                sig,
+            } => (
+                kind::REVOKE_DEVICE,
+                enc(&(device, last_seq, person, sig)),
+                None,
+            ),
         }
     }
 }
@@ -231,10 +280,15 @@ impl LedgerEntry {
             }
             kind::UPDATE_NODE => {
                 let (title, body) = self.text()?;
+                let (node, base) = match dec::<(NodeId, Hash)>(p) {
+                    Ok((node, base)) => (node, Some(base)),
+                    Err(_) => (dec(p)?, None),
+                };
                 Op::UpdateNode {
-                    node: dec(p)?,
+                    node,
                     title,
                     body,
+                    base,
                 }
             }
             kind::LINK => {
@@ -259,6 +313,24 @@ impl LedgerEntry {
                     node,
                     deletable,
                     exportable,
+                }
+            }
+            kind::CERTIFY_DEVICE => {
+                let (device, name, person, sig) = dec(p)?;
+                Op::CertifyDevice {
+                    device,
+                    name,
+                    person,
+                    sig,
+                }
+            }
+            kind::REVOKE_DEVICE => {
+                let (device, last_seq, person, sig) = dec(p)?;
+                Op::RevokeDevice {
+                    device,
+                    last_seq,
+                    person,
+                    sig,
                 }
             }
             other => return Err(Decode::Unknown(other)),
@@ -561,6 +633,7 @@ mod tests {
                 node: a,
                 title: "Ziel 2".into(),
                 body: "mehr".into(),
+                base: Some(Hash([4; 32])),
             },
             Op::Link {
                 from: b,
@@ -592,6 +665,21 @@ mod tests {
         assert_eq!(verify_chain(&c), Ok(ops.len()));
         // Links and markers carry no content.
         assert!(c[2].content.is_none() && c[5].content.is_none());
+    }
+
+    /// Updates written before M4 have no base; their params keep the old form and still decode.
+    #[test]
+    fn updates_without_base_keep_the_old_params() {
+        let node = NodeId([5; 16]);
+        let op = Op::UpdateNode {
+            node,
+            title: "alt".into(),
+            body: String::new(),
+            base: None,
+        };
+        let e = signer().append(None, 1, op.clone());
+        assert_eq!(e.head.params.0, enc(&node));
+        assert_eq!(e.op(), Ok(op));
     }
 
     #[test]
