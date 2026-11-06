@@ -56,7 +56,7 @@ cd apps/desktop && cargo tauri dev
 - **M2 Verknüpfen:** fertig (v0.2.0): Kanten, Graph, Bearbeiten mit Verlauf, E2E-Test
 - **M3 Mitdenken:** fertig (v0.2.0): KI-Vorschlag mit Quellen, Annehmen/Ablehnen im Ledger, sensible Knoten, Feedback-Link. Offen: Woche Dogfooding (Checkpoint)
 - **Vor M4:** fertig (v0.2.0): Kettenformat v2 (Protokoll 2) mit Löschen, „löschbar“ und „exportierbar“ pro Knoten (E2, E3, E13)
-- **M4 Synchron:** Personen-Schlüssel (E5), Abgleich über sz, neueste Version gewinnt mit Hinweis, Widerruf. Einrichtung: [BETRIEB.md](docs/BETRIEB.md#abgleich-m4)
+- **M4 Synchron:** fertig (v0.3.0): Personen-Schlüssel (E5), Abgleich über sz, neueste Version gewinnt mit Hinweis, Widerruf. Einrichtung: [BETRIEB.md](docs/BETRIEB.md#abgleich-m4)
 
 End-to-End-Test lokal (braucht `trunk build --release` in `apps/ui`):
 ```bash
