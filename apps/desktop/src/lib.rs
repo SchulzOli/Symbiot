@@ -220,10 +220,10 @@ fn revoke(store: State<AppStore>, words: String, device: PubKey) -> Result<Perso
     })
 }
 
-/// M4: where syncing with sz stands. Shown in the footer.
+/// M4: where syncing with sz stands. Shown under „Geräte“.
 #[derive(Clone, Default, serde::Serialize)]
 struct SyncStatus {
-    /// `SYMBIOT_SYNC_URL`, if set.
+    /// The address of sz, if set (in the app, or `SYMBIOT_SYNC_URL` until then).
     url: Option<String>,
     last_ok_ms: Option<u64>,
     last_error: Option<String>,
@@ -231,17 +231,76 @@ struct SyncStatus {
 }
 
 struct Sync {
-    remote: Option<symbiot_sync::Remote>,
+    remote: Mutex<Option<Arc<symbiot_sync::Remote>>>,
     status: Mutex<SyncStatus>,
+    /// Where the address set in the app is kept: `<app data>/sync-url.txt`.
+    file: std::path::PathBuf,
+}
+
+/// `https://…` or `http://…`, without a trailing slash; empty means „no sync“.
+fn clean_url(url: &str) -> Result<Option<String>, String> {
+    let url = url.trim().trim_end_matches('/');
+    if url.is_empty() {
+        return Ok(None);
+    }
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("Die Adresse beginnt mit https:// (oder http://)".into());
+    }
+    Ok(Some(url.to_string()))
 }
 
 impl Sync {
+    /// The address saved in the app wins; until one is saved, `SYMBIOT_SYNC_URL` counts.
+    fn load(file: std::path::PathBuf) -> Self {
+        let url = match std::fs::read_to_string(&file) {
+            Ok(saved) => clean_url(&saved).ok().flatten(),
+            Err(_) => std::env::var("SYMBIOT_SYNC_URL")
+                .ok()
+                .and_then(|u| clean_url(&u).ok().flatten()),
+        };
+        Sync {
+            remote: Mutex::new(
+                url.as_deref()
+                    .map(|u| Arc::new(symbiot_sync::Remote::new(u))),
+            ),
+            status: Mutex::new(SyncStatus {
+                url,
+                ..SyncStatus::default()
+            }),
+            file,
+        }
+    }
+
+    fn set_url(&self, url: &str) -> Result<SyncStatus, String> {
+        let url = clean_url(url)?;
+        std::fs::write(&self.file, url.as_deref().unwrap_or(""))
+            .map_err(|e| format!("Adresse nicht speicherbar: {e}"))?;
+        *self.remote.lock().unwrap_or_else(|p| p.into_inner()) = url
+            .as_deref()
+            .map(|u| Arc::new(symbiot_sync::Remote::new(u)));
+        let mut status = self.status.lock().unwrap_or_else(|p| p.into_inner());
+        *status = SyncStatus {
+            url,
+            ..SyncStatus::default()
+        };
+        Ok(status.clone())
+    }
+
     /// One round; offline is not a failure of the app, only a status.
     fn run(&self, store: &Mutex<Store>) -> SyncStatus {
-        let Some(remote) = &self.remote else {
-            return SyncStatus::default();
+        let remote = self
+            .remote
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        let Some(remote) = remote else {
+            return self
+                .status
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .clone();
         };
-        let result = symbiot_sync::sync(store, remote);
+        let result = symbiot_sync::sync(store, &remote);
         let mut status = self.status.lock().unwrap_or_else(|p| p.into_inner());
         match result {
             Ok(report) => {
@@ -271,6 +330,23 @@ async fn sync_now(
         .map_err(|e| e.to_string())
 }
 
+/// Saves the address of sz and syncs right away. Empty switches syncing off.
+#[tauri::command]
+async fn set_sync_url(
+    store: State<'_, AppStore>,
+    sync: State<'_, Arc<Sync>>,
+    url: String,
+) -> Result<SyncStatus, String> {
+    let status = sync.set_url(&url)?;
+    if status.url.is_none() {
+        return Ok(status);
+    }
+    let (store, sync) = (store.0.clone(), sync.inner().clone());
+    tauri::async_runtime::spawn_blocking(move || sync.run(&store))
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn sync_status(sync: State<Arc<Sync>>) -> SyncStatus {
     sync.status
@@ -286,26 +362,15 @@ pub fn run() {
             let dir = app.path().app_data_dir()?;
             let store = Arc::new(Mutex::new(Store::open_dir(&dir)?));
             app.manage(AppStore(store.clone()));
-            // M4: sync with sz every minute if `SYMBIOT_SYNC_URL` is set.
-            let url = std::env::var("SYMBIOT_SYNC_URL")
-                .ok()
-                .filter(|u| !u.is_empty());
-            let sync = Arc::new(Sync {
-                remote: url.as_deref().map(symbiot_sync::Remote::new),
-                status: Mutex::new(SyncStatus {
-                    url,
-                    ..SyncStatus::default()
-                }),
-            });
+            // M4: sync with sz every minute, once an address is set.
+            let sync = Arc::new(Sync::load(dir.join("sync-url.txt")));
             app.manage(sync.clone());
-            if sync.remote.is_some() {
-                std::thread::spawn(move || {
-                    loop {
-                        sync.run(&store);
-                        std::thread::sleep(std::time::Duration::from_secs(60));
-                    }
-                });
-            }
+            std::thread::spawn(move || {
+                loop {
+                    sync.run(&store);
+                    std::thread::sleep(std::time::Duration::from_secs(60));
+                }
+            });
             let ai = symbiot_ai::Config::from_env()
                 .map(|c| Arc::new(symbiot_ai::LiteLlm::new(c)) as Arc<dyn Advisor>);
             app.manage(Ai(ai));
@@ -334,6 +399,7 @@ pub fn run() {
             certify,
             revoke,
             sync_now,
+            set_sync_url,
             sync_status,
             verify_all
         ])
