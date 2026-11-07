@@ -37,6 +37,12 @@ fn App() -> impl IntoView {
     // Bumped after every write so everything reloads.
     let version = RwSignal::new(0u32);
     let saved = move || version.update(|v| *v += 1);
+    // M4: as long as this device is not set up, „Geräte“ stands at the top.
+    let who = LocalResource::new(move || {
+        version.track();
+        api::person()
+    });
+    let set_up = move || who.get().and_then(|r| r.ok()).map(|p| p.person.is_some());
     let data = LocalResource::new(move || {
         version.track();
         load()
@@ -48,6 +54,7 @@ fn App() -> impl IntoView {
                 <h1>"Symbiot"</h1>
                 <p class="tagline">"Die KI schlägt vor, du entscheidest."</p>
             </header>
+            {move || (set_up() == Some(false)).then(|| view! { <devices::Devices refresh=version on_saved=saved /> })}
             <Capture on_saved=saved />
             <nav class="row between">
                 <Filter filter />
@@ -85,7 +92,7 @@ fn App() -> impl IntoView {
                 }
             }}
             <Verify refresh=version />
-            <devices::Devices refresh=version on_saved=saved />
+            {move || (set_up() == Some(true)).then(|| view! { <devices::Devices refresh=version on_saved=saved /> })}
             <footer>
                 {format!(
                     "Daten: {} · core {} · protocol {} · ",

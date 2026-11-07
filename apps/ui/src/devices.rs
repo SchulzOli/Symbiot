@@ -220,25 +220,48 @@ fn DeviceRow(
     }
 }
 
-/// In the app: when this device last synced with sz, and a button to sync now.
+/// In the app: the address of sz, when this device last synced, and a button to sync now.
+/// In the browser the UI runs on sz itself, the hub.
 #[component]
 fn SyncState(on_saved: impl Fn() + Copy + Send + Sync + 'static) -> impl IntoView {
-    let status = LocalResource::new(api::sync_status);
+    // `None` until loaded; `Some(None)` in the browser.
+    let current = RwSignal::new(None::<Option<api::SyncStatus>>);
+    let address = RwSignal::new(String::new());
     let busy = RwSignal::new(false);
-    let now = RwSignal::new(None::<Result<api::SyncStatus, String>>);
+    let error = RwSignal::new(None::<String>);
+    spawn_local(async move {
+        match api::sync_status().await {
+            Ok(s) => {
+                address.set(s.as_ref().and_then(|s| s.url.clone()).unwrap_or_default());
+                current.set(Some(s));
+            }
+            Err(e) => error.set(Some(e)),
+        }
+    });
+    let finish = move |r: Result<api::SyncStatus, String>| {
+        match r {
+            Ok(s) => {
+                if s.url.is_some() && s.last_error.is_none() {
+                    on_saved();
+                }
+                error.set(None);
+                current.set(Some(Some(s)));
+            }
+            Err(e) => error.set(Some(e)),
+        }
+        busy.set(false);
+    };
     let sync = move |_| {
         busy.set(true);
-        spawn_local(async move {
-            let r = api::sync_now().await;
-            if r.as_ref().is_ok_and(|s| s.last_error.is_none()) {
-                on_saved();
-            }
-            now.set(Some(r));
-            busy.set(false);
-        })
+        spawn_local(async move { finish(api::sync_now().await) })
     };
-    let describe = |s: &api::SyncStatus| -> (String, Option<String>) {
-        let ok = match (s.last_ok_ms, s.last) {
+    let save = move |ev: leptos::ev::SubmitEvent| {
+        ev.prevent_default();
+        busy.set(true);
+        spawn_local(async move { finish(api::set_sync_url(address.get_untracked()).await) })
+    };
+    let describe = |s: &api::SyncStatus| -> String {
+        match (s.last_ok_ms, s.last) {
             (Some(ms), Some(r)) => format!(
                 "Zuletzt abgeglichen {} · {} gesendet, {} empfangen",
                 format_ms(ms),
@@ -246,32 +269,45 @@ fn SyncState(on_saved: impl Fn() + Copy + Send + Sync + 'static) -> impl IntoVie
                 r.received
             ),
             _ => "Noch nicht abgeglichen".into(),
-        };
-        (ok, s.last_error.clone())
+        }
     };
     view! {
-        {move || match (now.get(), status.get()) {
-            (Some(Err(e)), _) => view! { <p class="error">{e}</p> }.into_any(),
-            (Some(Ok(s)), _) | (None, Some(Ok(Some(s)))) if s.url.is_some() => {
-                let (ok, err) = describe(&s);
-                view! {
-                    <div class="sync row">
-                        <span class="muted">{ok}</span>
-                        {err.map(|e| view! { <span class="error">{e}</span> })}
-                        <button class="chip" on:click=sync disabled=move || busy.get()>"Jetzt abgleichen"</button>
-                    </div>
-                }
-                .into_any()
-            }
-            (_, Some(Ok(Some(_)))) => view! {
-                <p class="muted">"Kein Abgleich eingerichtet: SYMBIOT_SYNC_URL setzen (z. B. die Adresse von sz)."</p>
-            }
-            .into_any(),
-            (_, Some(Ok(None))) => view! {
+        {move || match current.get() {
+            None => view! { <span></span> }.into_any(),
+            Some(None) => view! {
                 <p class="muted">"Dies ist sz: Hier gleichen deine Geräte ab."</p>
             }
             .into_any(),
-            _ => view! { <span></span> }.into_any(),
+            Some(Some(s)) => view! {
+                <form class="sync-address row" on:submit=save>
+                    <label class="row">
+                        "Adresse von sz"
+                        <input
+                            type="text"
+                            placeholder="https://sz.tailacb899.ts.net:8449"
+                            bind:value=address
+                            aria-label="Adresse von sz"
+                        />
+                    </label>
+                    <button type="submit" class="chip" disabled=move || busy.get()>"Speichern"</button>
+                </form>
+                {match s.url {
+                    Some(_) => view! {
+                        <div class="sync row">
+                            <span class="muted">{describe(&s)}</span>
+                            {s.last_error.clone().map(|e| view! { <span class="error">{e}</span> })}
+                            <button class="chip" on:click=sync disabled=move || busy.get()>"Jetzt abgleichen"</button>
+                        </div>
+                    }
+                    .into_any(),
+                    None => view! {
+                        <p class="muted">"Kein Abgleich eingerichtet: Adresse von sz eintragen und speichern."</p>
+                    }
+                    .into_any(),
+                }}
+            }
+            .into_any(),
         }}
+        {move || error.get().map(|e| view! { <p class="error">{e}</p> })}
     }
 }

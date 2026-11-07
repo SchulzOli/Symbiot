@@ -288,6 +288,15 @@ pub async fn sync_now() -> ApiResult<SyncStatus> {
     invoke("sync_now", &NoArgs {}).await
 }
 
+/// Saves the address of sz in the app and syncs right away. Empty switches syncing off.
+pub async fn set_sync_url(url: String) -> ApiResult<SyncStatus> {
+    #[derive(Serialize)]
+    struct Args {
+        url: String,
+    }
+    invoke("set_sync_url", &Args { url }).await
+}
+
 /// Whether this UI runs inside the app (local data) or in the browser on sz.
 pub fn in_app() -> bool {
     tauri_invoke_fn().is_some()

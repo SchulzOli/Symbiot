@@ -230,3 +230,5 @@ button.danger-link { color: var(--error); }
 }
 .concurrent-note p { margin: 0 0 0.5rem; }
 @media (max-width: 480px) { .words { columns: 2; } }
+.sync-address { gap: 0.5rem; }
+.sync-address label { flex: 1; gap: 0.5rem; }
