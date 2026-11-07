@@ -4,8 +4,8 @@
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use symbiot_core::{
-    Edge, EdgeId, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal, PubKey,
-    VerifyReport,
+    Edge, EdgeId, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal, PubKey, Rule,
+    RuleId, VerifyReport,
 };
 use wasm_bindgen::{JsCast, JsValue};
 
@@ -300,6 +300,89 @@ pub async fn set_sync_url(url: String) -> ApiResult<SyncStatus> {
 /// Whether this UI runs inside the app (local data) or in the browser on heimserver.
 pub fn in_app() -> bool {
     tauri_invoke_fn().is_some()
+}
+
+/// Mirrors `symbiot_ai::RuleProposal` (E4): a rule the AI suggests, not saved yet.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct RuleProposal {
+    pub label: String,
+    pub keywords: Vec<String>,
+    pub matches: Vec<NodeId>,
+    pub model: String,
+}
+
+/// Mirrors `symbiot_store::Sensitivity`: why a node is sensitive or not.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+pub struct Sensitivity {
+    pub sensitive: bool,
+    pub by_hand: Option<bool>,
+    pub rules: Vec<String>,
+}
+
+pub async fn list_rules() -> ApiResult<Vec<Rule>> {
+    #[derive(Serialize)]
+    struct NoArgs {}
+    if tauri_invoke_fn().is_some() {
+        return invoke("list_rules", &NoArgs {}).await;
+    }
+    http_json(gloo_net::http::Request::get("/api/rules").build()).await
+}
+
+/// E4: the human accepts a rule — their own (`model: None`) or one the AI suggested.
+pub async fn add_rule(
+    label: String,
+    keywords: Vec<String>,
+    model: Option<String>,
+) -> ApiResult<Rule> {
+    #[derive(Serialize)]
+    struct Args {
+        label: String,
+        keywords: Vec<String>,
+        model: Option<String>,
+    }
+    let args = Args {
+        label,
+        keywords,
+        model,
+    };
+    if tauri_invoke_fn().is_some() {
+        return invoke("add_rule", &args).await;
+    }
+    http_json(gloo_net::http::Request::post("/api/rules").json(&args)).await
+}
+
+pub async fn remove_rule(id: RuleId) -> ApiResult<()> {
+    #[derive(Serialize)]
+    struct Args {
+        id: RuleId,
+    }
+    if tauri_invoke_fn().is_some() {
+        return invoke("remove_rule", &Args { id }).await;
+    }
+    let url = format!("/api/rules/{id}");
+    http_empty(gloo_net::http::Request::delete(&url).build()).await
+}
+
+/// E4: the local model suggests rules. Writes nothing.
+pub async fn suggest_rules() -> ApiResult<Vec<RuleProposal>> {
+    #[derive(Serialize)]
+    struct NoArgs {}
+    if tauri_invoke_fn().is_some() {
+        return invoke("suggest_rules", &NoArgs {}).await;
+    }
+    http_json(gloo_net::http::Request::post("/api/rules/suggest").build()).await
+}
+
+pub async fn node_sensitivity(id: NodeId) -> ApiResult<Sensitivity> {
+    #[derive(Serialize)]
+    struct Args {
+        id: NodeId,
+    }
+    if tauri_invoke_fn().is_some() {
+        return invoke("node_sensitivity", &Args { id }).await;
+    }
+    let url = format!("/api/nodes/{id}/sensitivity");
+    http_json(gloo_net::http::Request::get(&url).build()).await
 }
 
 /// Mirrors `symbiot_ai::Info` (that crate is native-only).

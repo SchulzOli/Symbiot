@@ -178,10 +178,26 @@ fn Sensitive(
             }
         });
     };
+    // E4: why — by hand or by which rule.
+    let why = LocalResource::new(move || api::node_sensitivity(id));
+    let reason = move || {
+        why.get()
+            .and_then(|r| r.ok())
+            .map(|w| match (w.by_hand, w.rules.is_empty()) {
+                (Some(true), _) => "von Hand".to_string(),
+                (Some(false), false) => format!(
+                    "von Hand ausgenommen, obwohl Regel „{}“ passt",
+                    w.rules.join("“, „")
+                ),
+                (Some(false), true) | (None, true) => String::new(),
+                (None, false) => format!("durch Regel „{}“", w.rules.join("“, „")),
+            })
+    };
     view! {
         <label class="sensitive row">
             <input type="checkbox" prop:checked=sensitive on:change=toggle />
             "🔒 Sensibel – verlässt nie das Heimnetz"
+            {move || reason().filter(|r| !r.is_empty()).map(|r| view! { <span class="muted">{format!("({r})")}</span> })}
             {move || error.get().map(|e| view! { <span class="error">{e}</span> })}
         </label>
     }

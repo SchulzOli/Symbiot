@@ -56,7 +56,12 @@ eigenen Eintrag (`SetPolicy { node, deletable, exportable }`), den die Projektio
 Jede Änderung ist ein neuer signierter `SetPolicy`-Eintrag, im Verlauf sichtbar. „Nicht löschbar“ bedeutet
 damit: nicht löschbar, solange der Mensch es nicht ändert.
 
-## E4 — Was ist sensibel? · *entschieden*
+## E4 — Was ist sensibel? · *entschieden, umgesetzt*
+
+**Umgesetzt (2026-11-07):** Eine Regel ist ein Name und Stichwörter (klein, mindestens drei Buchstaben); ein Knoten
+ist sensibel, wenn Titel oder Text ein Stichwort enthält. Regeln sind Einträge (`AddSensitivityRule`,
+`RemoveSensitivityRule`, Kennungen 10 und 11) und werden nie weggeräumt. Vorschläge macht nur das lokale Modell,
+weil es dafür alle Knoten sieht.
 
 - **Die KI erkennt** möglicherweise sensible Inhalte und **schlägt eine Regel vor** (z. B. „Gesundheitsdaten
   sind sensibel“). **Zur Regel wird es erst, wenn der Mensch zustimmt.** Angenommene Regeln sind Einträge in

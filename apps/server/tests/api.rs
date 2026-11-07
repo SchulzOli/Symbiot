@@ -5,7 +5,7 @@ use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 
-use symbiot_ai::{Advisor, Context, Info};
+use symbiot_ai::{Advisor, Context, Info, RuleContext, RuleProposal};
 use symbiot_core::{LedgerEntry, NodeKind, Op, Proposal, Signer};
 use symbiot_store::Store;
 use tower::ServiceExt;
@@ -46,6 +46,12 @@ impl Advisor for FakeAi {
             sources,
             model: if ctx.remote { "fake-remote" } else { "fake" }.into(),
         })
+    }
+
+    /// Suggests „Gesundheit“ for every node that mentions a doctor.
+    fn suggest_rules(&self, ctx: &RuleContext) -> Result<Vec<RuleProposal>, symbiot_ai::Error> {
+        let reply = r#"{"rules": [{"label": "Gesundheit", "keywords": ["arzt", "befund"]}]}"#;
+        symbiot_ai::parse_rules(reply, ctx, "fake")
     }
 }
 
@@ -452,4 +458,96 @@ async fn without_ai_the_rest_still_works() {
             .unwrap()
             .contains("nicht eingerichtet")
     );
+}
+
+/// E4 acceptance: the AI suggests a rule, nothing changes until the human accepts it; then
+/// matching nodes are sensitive and stay away from an external model; by hand wins.
+#[tokio::test]
+async fn sensitivity_rules_from_the_ai() {
+    let (app, ai) = app_with_ai();
+    let node = |kind: &str, title: &str| json!({"kind": kind, "title": title});
+    let (_, goal) = call(
+        &app,
+        "POST",
+        "/api/nodes",
+        Some(node("goal", "Gesünder leben")),
+    )
+    .await;
+    let (_, doctor) = call(
+        &app,
+        "POST",
+        "/api/nodes",
+        Some(node("reflection", "Befund vom Arzt")),
+    )
+    .await;
+    let goal = goal["id"].as_str().unwrap().to_string();
+    let doctor = doctor["id"].as_str().unwrap().to_string();
+    let before = entries(&app).await;
+
+    let (s, suggested) = call(&app, "POST", "/api/rules/suggest", None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(suggested[0]["label"], "Gesundheit");
+    assert_eq!(suggested[0]["matches"], json!([doctor]));
+    assert_eq!(entries(&app).await, before, "a suggestion writes nothing");
+    let (_, sensitive) = call(&app, "GET", "/api/sensitive", None).await;
+    assert_eq!(sensitive, json!([]));
+
+    // The human accepts it.
+    let (s, rule) = call(
+        &app,
+        "POST",
+        "/api/rules",
+        Some(json!({
+            "label": suggested[0]["label"],
+            "keywords": suggested[0]["keywords"],
+            "model": suggested[0]["model"],
+        })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED);
+    let (_, sensitive) = call(&app, "GET", "/api/sensitive", None).await;
+    assert_eq!(sensitive, json!([doctor]));
+    let (_, why) = call(
+        &app,
+        "GET",
+        &format!("/api/nodes/{doctor}/sensitivity"),
+        None,
+    )
+    .await;
+    assert_eq!(why["rules"], json!(["Gesundheit"]));
+
+    // The external model no longer sees the doctor's note.
+    let propose = format!("/api/nodes/{goal}/propose");
+    call(&app, "POST", &propose, Some(json!({"remote": true}))).await;
+    {
+        let seen = ai.seen.lock().unwrap();
+        let last = seen.last().unwrap();
+        assert!(last.related.iter().all(|r| r.node.id.to_hex() != doctor));
+        assert_eq!(last.withheld, 1);
+    }
+
+    // By hand wins; removing the rule leaves the mark by hand.
+    call(
+        &app,
+        "PUT",
+        &format!("/api/nodes/{doctor}/sensitive"),
+        Some(json!({"sensitive": false})),
+    )
+    .await;
+    let (_, sensitive) = call(&app, "GET", "/api/sensitive", None).await;
+    assert_eq!(sensitive, json!([]));
+    let id = rule["id"].as_str().unwrap();
+    let (s, _) = call(&app, "DELETE", &format!("/api/rules/{id}"), None).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (_, rules) = call(&app, "GET", "/api/rules", None).await;
+    assert_eq!(rules, json!([]));
+    let (s, err) = call(
+        &app,
+        "POST",
+        "/api/rules",
+        Some(json!({"label": "x", "keywords": ["ab"]})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert!(err["error"].as_str().unwrap().contains("Stichwörter"));
 }

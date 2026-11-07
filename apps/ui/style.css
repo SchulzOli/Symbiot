@@ -232,3 +232,17 @@ button.danger-link { color: var(--error); }
 @media (max-width: 480px) { .words { columns: 2; } }
 .sync-address { gap: 0.5rem; }
 .sync-address label { flex: 1; gap: 0.5rem; }
+
+/* E4 — Regeln für Sensibles */
+.rules {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+.rules h4 { margin: 0; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.rules > p { margin: 0; }
+.rule-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.own-rule input[type="text"] { min-width: 140px; }

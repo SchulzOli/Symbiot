@@ -44,6 +44,11 @@ export default defineConfig({
       use: { baseURL: "http://127.0.0.1:8103" },
     },
     {
+      name: "sensibel",
+      testMatch: "sensibel.spec.ts",
+      use: { baseURL: "http://127.0.0.1:8107" },
+    },
+    {
       name: "geraete",
       testMatch: "geraete.spec.ts",
       use: { baseURL: "http://127.0.0.1:8105" },
@@ -63,5 +68,9 @@ export default defineConfig({
       SYMBIOT_AI_MODEL: "mock",
     }),
     server(8105),
+    server(8107, {
+      SYMBIOT_AI_URL: `http://127.0.0.1:${llmPort}/v1`,
+      SYMBIOT_AI_MODEL: "mock",
+    }),
   ],
 });

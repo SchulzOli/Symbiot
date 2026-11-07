@@ -103,6 +103,11 @@ byte_newtype!(
 );
 
 byte_newtype!(
+    /// Stable rule id (E4): the first 16 bytes of the hash of the entry that added it.
+    RuleId, 16
+);
+
+byte_newtype!(
     /// Per-part salt: without it, short removed content could be confirmed by guessing.
     Salt, 16
 );
@@ -175,5 +180,11 @@ impl NodeId {
 impl EdgeId {
     pub fn from_entry_hash(h: &Hash) -> Self {
         EdgeId(h.prefix16())
+    }
+}
+
+impl RuleId {
+    pub fn from_entry_hash(h: &Hash) -> Self {
+        RuleId(h.prefix16())
     }
 }

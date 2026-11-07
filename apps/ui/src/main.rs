@@ -4,6 +4,7 @@ mod api;
 mod detail;
 mod devices;
 mod graph;
+mod rules;
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -92,6 +93,7 @@ fn App() -> impl IntoView {
                 }
             }}
             <Verify refresh=version />
+            <rules::Rules refresh=version on_saved=saved />
             {move || (set_up() == Some(true)).then(|| view! { <devices::Devices refresh=version on_saved=saved /> })}
             <footer>
                 {format!(

@@ -12,17 +12,28 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rusqlite::{Connection, OptionalExtension, params};
 use symbiot_core::{
     ApplyError, Change, Edge, EdgeId, EdgeKind, Hash, Head, LedgerEntry, Lookup, Node, NodeId,
-    NodeKind, Op, Policy, Proposal, PubKey, Sig, Signer, Trust, replay,
+    NodeKind, Op, Policy, Proposal, PubKey, Rule, RuleId, Sig, Signer, Trust, replay,
 };
 
 /// `PRAGMA user_version` of the current schema. 0 with an `entry` column is the v1 format.
 /// 3: nodes carry `concurrent` (M4); the projection is rebuilt from the ledger on upgrade.
-const SCHEMA_VERSION: i64 = 3;
+/// 4: rules for what is sensitive and marks by hand (E4); `sensitive` holds the result.
+const SCHEMA_VERSION: i64 = 4;
 
 mod sync;
 
 pub use symbiot_core::VerifyReport;
 pub use sync::{ChainHead, DeviceInfo, new_words};
+
+/// Why a node is sensitive or not (E4): marked by hand, which rules match.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Sensitivity {
+    pub sensitive: bool,
+    /// Set by hand; wins over the rules.
+    pub by_hand: Option<bool>,
+    /// Labels of the rules that match.
+    pub rules: Vec<String>,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -165,6 +176,14 @@ impl Store {
                  node_id    BLOB PRIMARY KEY,
                  deletable  INTEGER NOT NULL,
                  exportable INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS by_hand (
+                 node_id   BLOB PRIMARY KEY,
+                 sensitive INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS rules (
+                 id   BLOB PRIMARY KEY,
+                 rule BLOB NOT NULL
              );
              CREATE TABLE IF NOT EXISTS forks (
                  author BLOB NOT NULL,
@@ -324,7 +343,54 @@ impl Store {
         .map(|_| ())
     }
 
-    /// All nodes currently marked as sensitive.
+    /// E4: from now on, nodes containing one of `keywords` are sensitive, on every device.
+    /// `model` names the AI that suggested the rule, if any. Keywords are cleaned first.
+    pub fn add_rule(
+        &mut self,
+        label: &str,
+        keywords: &[String],
+        model: Option<String>,
+    ) -> Result<Rule> {
+        match self.append(Op::AddSensitivityRule {
+            label: label.trim().into(),
+            keywords: symbiot_core::rule::clean_keywords(keywords),
+            model,
+        })? {
+            Change::Rule(r) => Ok(r),
+            _ => unreachable!("AddSensitivityRule yields a rule"),
+        }
+    }
+
+    pub fn remove_rule(&mut self, id: RuleId) -> Result<()> {
+        self.append(Op::RemoveSensitivityRule { rule: id })
+            .map(|_| ())
+    }
+
+    /// The rules in force, oldest first.
+    pub fn rules(&self) -> Result<Vec<Rule>> {
+        let mut rules = read_rules(&self.conn)?;
+        rules.sort_by_key(|r| r.created_ms);
+        Ok(rules)
+    }
+
+    /// Why a node is sensitive or not: by hand, by which rules (E4).
+    pub fn sensitivity(&self, id: NodeId) -> Result<Sensitivity> {
+        let node = self.node(id)?.ok_or(Error::UnknownNode(id))?;
+        let by_hand = read_by_hand(&self.conn, &id)?;
+        let rules: Vec<String> = self
+            .rules()?
+            .into_iter()
+            .filter(|r| r.matches(&node))
+            .map(|r| r.label)
+            .collect();
+        Ok(Sensitivity {
+            sensitive: by_hand.unwrap_or(!rules.is_empty()),
+            by_hand,
+            rules,
+        })
+    }
+
+    /// All nodes currently sensitive — by hand or by a rule.
     pub fn sensitive_nodes(&self) -> Result<Vec<NodeId>> {
         node_ids(&self.conn, "SELECT node_id FROM sensitive")
     }
@@ -358,6 +424,7 @@ struct Known {
     edge: Option<Edge>,
     duplicate: bool,
     policy: Policy,
+    rule: Option<Rule>,
 }
 
 impl Lookup for Known {
@@ -375,6 +442,10 @@ impl Lookup for Known {
 
     fn policy(&self, _: &NodeId) -> Policy {
         self.policy
+    }
+
+    fn rule(&self, id: &RuleId) -> Option<Rule> {
+        self.rule.clone().filter(|r| r.id == *id)
     }
 }
 
@@ -398,7 +469,9 @@ fn append_in(tx: &Connection, signer: &Signer, op: Op) -> Result<Change> {
         Op::CreateNode { .. }
         | Op::Unlink { .. }
         | Op::CertifyDevice { .. }
-        | Op::RevokeDevice { .. } => vec![],
+        | Op::RevokeDevice { .. }
+        | Op::AddSensitivityRule { .. }
+        | Op::RemoveSensitivityRule { .. } => vec![],
         Op::UpdateNode { node, .. }
         | Op::MarkSensitive { node, .. }
         | Op::DeleteNode { node }
@@ -419,6 +492,9 @@ fn append_in(tx: &Connection, signer: &Signer, op: Op) -> Result<Change> {
         Op::Link { from, to, kind } => known.duplicate = edge_exists(tx, from, to, *kind)?,
         Op::Unlink { edge } => known.edge = read_edge(tx, edge)?,
         Op::DeleteNode { node } => known.policy = read_policy(tx, node)?,
+        Op::RemoveSensitivityRule { rule } => {
+            known.rule = read_rules(tx)?.into_iter().find(|r| r.id == *rule)
+        }
         _ => {}
     }
 
@@ -432,6 +508,10 @@ fn append_in(tx: &Connection, signer: &Signer, op: Op) -> Result<Change> {
         ApplyError::DuplicateEdge => Error::Invalid("Diese Verbindung gibt es schon"),
         ApplyError::NoSources => Error::Invalid("Ein Vorschlag ohne Quellen wird verworfen"),
         ApplyError::EmptyTitle => Error::Invalid("Titel darf nicht leer sein"),
+        ApplyError::UnknownRule(_) => Error::Invalid("Diese Regel gibt es nicht"),
+        ApplyError::EmptyRule => Error::Invalid(
+            "Eine Regel braucht einen Namen und Stichwörter mit mindestens drei Buchstaben",
+        ),
         ApplyError::Undecodable(_) => Error::Invalid("Eintrag nicht lesbar"),
     })?;
 
@@ -489,6 +569,7 @@ fn project(tx: &Connection, change: &Change) -> Result<()> {
     match change {
         Change::Node(node) => {
             write_node(tx, node)?;
+            refresh_sensitive(tx, Some(node))?;
         }
         Change::Edge(edge) => {
             write_edge(tx, edge)?;
@@ -496,25 +577,28 @@ fn project(tx: &Connection, change: &Change) -> Result<()> {
         Change::Accepted { node, edge } => {
             write_node(tx, node)?;
             write_edge(tx, edge)?;
+            refresh_sensitive(tx, Some(node))?;
         }
         Change::Rejected | Change::Device => {}
-        Change::Sensitivity {
-            node,
-            sensitive: true,
-        } => {
+        Change::Sensitivity { node, sensitive } => {
             tx.execute(
-                "INSERT OR IGNORE INTO sensitive (node_id) VALUES (?1)",
-                [node.0.as_slice()],
+                "INSERT OR REPLACE INTO by_hand (node_id, sensitive) VALUES (?1, ?2)",
+                params![node.0.as_slice(), sensitive],
             )?;
+            if let Some(n) = read_node(tx, node)? {
+                refresh_sensitive(tx, Some(&n))?;
+            }
         }
-        Change::Sensitivity {
-            node,
-            sensitive: false,
-        } => {
+        Change::Rule(rule) => {
             tx.execute(
-                "DELETE FROM sensitive WHERE node_id = ?1",
-                [node.0.as_slice()],
+                "INSERT INTO rules (id, rule) VALUES (?1, ?2)",
+                params![rule.id.0.as_slice(), postcard::to_allocvec(rule)?],
             )?;
+            refresh_sensitive(tx, None)?;
+        }
+        Change::RuleRemoved(id) => {
+            tx.execute("DELETE FROM rules WHERE id = ?1", [id.0.as_slice()])?;
+            refresh_sensitive(tx, None)?;
         }
         Change::Deleted { node, prune } => {
             let id = node.0.as_slice();
@@ -522,6 +606,7 @@ fn project(tx: &Connection, change: &Change) -> Result<()> {
             tx.execute("DELETE FROM edges WHERE from_id = ?1 OR to_id = ?1", [id])?;
             tx.execute("DELETE FROM sensitive WHERE node_id = ?1", [id])?;
             tx.execute("DELETE FROM policies WHERE node_id = ?1", [id])?;
+            tx.execute("DELETE FROM by_hand WHERE node_id = ?1", [id])?;
             // E2: the head stays (hash, signature), title and body go — with secure_delete.
             for h in prune {
                 tx.execute(
@@ -657,8 +742,21 @@ fn rebuild_projection(tx: &Connection, me: &PubKey) -> Result<()> {
         r.state.sensitive.remove(id);
     }
     tx.execute_batch(
-        "DELETE FROM nodes; DELETE FROM edges; DELETE FROM sensitive; DELETE FROM policies;",
+        "DELETE FROM nodes; DELETE FROM edges; DELETE FROM sensitive; DELETE FROM policies;
+         DELETE FROM by_hand; DELETE FROM rules;",
     )?;
+    for (id, sensitive) in &r.state.by_hand {
+        tx.execute(
+            "INSERT INTO by_hand (node_id, sensitive) VALUES (?1, ?2)",
+            params![id.0.as_slice(), sensitive],
+        )?;
+    }
+    for rule in r.state.rules.values() {
+        tx.execute(
+            "INSERT INTO rules (id, rule) VALUES (?1, ?2)",
+            params![rule.id.0.as_slice(), postcard::to_allocvec(rule)?],
+        )?;
+    }
     for node in r.state.nodes.values() {
         write_node(tx, node)?;
     }
@@ -771,6 +869,52 @@ fn read_edge(conn: &Connection, id: &EdgeId) -> Result<Option<Edge>> {
     .map(|b| postcard::from_bytes(&b))
     .transpose()
     .map_err(Error::from)
+}
+
+fn read_rules(conn: &Connection) -> Result<Vec<Rule>> {
+    let mut stmt = conn.prepare("SELECT rule FROM rules")?;
+    let rows = stmt.query_map([], |r| r.get::<_, Vec<u8>>(0))?;
+    rows.map(|b| Ok(postcard::from_bytes(&b?)?)).collect()
+}
+
+fn read_by_hand(conn: &Connection, id: &NodeId) -> Result<Option<bool>> {
+    Ok(conn
+        .query_row(
+            "SELECT sensitive FROM by_hand WHERE node_id = ?1",
+            [id.0.as_slice()],
+            |r| r.get(0),
+        )
+        .optional()?)
+}
+
+/// E4: writes the effective sensitivity of one node, or of all nodes after a rule changed.
+/// The SQLite twin of `State::refresh_sensitive`.
+fn refresh_sensitive(tx: &Connection, only: Option<&Node>) -> Result<()> {
+    let rules = read_rules(tx)?;
+    let nodes: Vec<Node> = match only {
+        Some(n) => vec![n.clone()],
+        None => {
+            let mut stmt = tx.prepare("SELECT node FROM nodes")?;
+            let rows = stmt.query_map([], |r| r.get::<_, Vec<u8>>(0))?;
+            rows.map(|b| Ok(postcard::from_bytes(&b?)?))
+                .collect::<Result<Vec<Node>>>()?
+        }
+    };
+    for node in &nodes {
+        let by_hand = read_by_hand(tx, &node.id)?;
+        if symbiot_core::rule::is_sensitive(node, by_hand, &rules) {
+            tx.execute(
+                "INSERT OR IGNORE INTO sensitive (node_id) VALUES (?1)",
+                [node.id.0.as_slice()],
+            )?;
+        } else {
+            tx.execute(
+                "DELETE FROM sensitive WHERE node_id = ?1",
+                [node.id.0.as_slice()],
+            )?;
+        }
+    }
+    Ok(())
 }
 
 /// Only nodes that differ from the default have a row.
@@ -1205,5 +1349,58 @@ mod tests {
         assert_eq!(devices.len(), 1);
         assert!(devices[0].this_device && devices[0].name == "PC");
         assert!(s.trusts(&s.device()).unwrap());
+    }
+
+    /// E4: a rule marks matching nodes in the store, by hand wins, and it survives a rebuild.
+    #[test]
+    fn rules_mark_sensitive_nodes() {
+        let dir = tempfile::tempdir().unwrap();
+        let (doctor, run) = {
+            let mut s = Store::open_dir(dir.path()).unwrap();
+            let doctor = s
+                .create_node(NodeKind::Reflection, "Arzttermin", "")
+                .unwrap();
+            let run = s.create_node(NodeKind::Goal, "Laufen", "").unwrap();
+            let r = s
+                .add_rule(
+                    " Gesundheit ",
+                    &["Arzt".into(), "Befund".into(), "ei".into()],
+                    Some("qwen3:8b".into()),
+                )
+                .unwrap();
+            assert_eq!(r.keywords, ["arzt", "befund"], "cleaned before signing");
+            assert_eq!(s.sensitive_nodes().unwrap(), vec![doctor.id]);
+            assert_eq!(s.home_only_nodes().unwrap(), vec![doctor.id]);
+            let why = s.sensitivity(doctor.id).unwrap();
+            assert!(why.sensitive && why.by_hand.is_none());
+            assert_eq!(why.rules, ["Gesundheit"]);
+
+            // An edit brings the run under the rule; by hand takes it out again.
+            s.update_node(run.id, "Laufen, Arzt sagt ok", "").unwrap();
+            assert_eq!(s.sensitive_nodes().unwrap().len(), 2);
+            s.set_sensitive(run.id, false).unwrap();
+            assert_eq!(s.sensitive_nodes().unwrap(), vec![doctor.id]);
+            assert_eq!(s.sensitivity(run.id).unwrap().by_hand, Some(false));
+            assert!(matches!(
+                s.add_rule("Leer", &["ab".into()], None),
+                Err(Error::Invalid(_))
+            ));
+            assert_eq!(s.rules().unwrap(), vec![r]);
+            (doctor, run)
+        };
+
+        // Rebuilt from the ledger: the same result.
+        let s = Store::open_dir(dir.path()).unwrap();
+        s.conn
+            .execute_batch("DELETE FROM sensitive; DELETE FROM rules; PRAGMA user_version = 3;")
+            .unwrap();
+        drop(s);
+        let mut s = Store::open_dir(dir.path()).unwrap();
+        assert_eq!(s.sensitive_nodes().unwrap(), vec![doctor.id]);
+        let rule = s.rules().unwrap().remove(0);
+        s.remove_rule(rule.id).unwrap();
+        assert!(s.sensitive_nodes().unwrap().is_empty());
+        assert_eq!(s.sensitivity(run.id).unwrap().by_hand, Some(false));
+        assert!(s.verify().unwrap().ok);
     }
 }

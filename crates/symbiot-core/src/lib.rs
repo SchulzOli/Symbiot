@@ -15,8 +15,9 @@ pub mod merkle;
 mod node;
 mod person;
 mod proposal;
+pub mod rule;
 
-pub use bytes::{Blob, EdgeId, Hash, NodeId, PubKey, Salt, Sig};
+pub use bytes::{Blob, EdgeId, Hash, NodeId, PubKey, RuleId, Salt, Sig};
 pub use edge::{Edge, EdgeKind};
 pub use ledger::{
     ContentRef, Decode, Head, LedgerEntry, Op, Part, Signer, VerifyError, VerifyReport,
@@ -25,6 +26,7 @@ pub use ledger::{
 pub use node::{ApplyError, Change, Lookup, Node, NodeKind, Policy, Replay, State, replay};
 pub use person::{Device, Person, Trust};
 pub use proposal::Proposal;
+pub use rule::Rule;
 
 /// Version of the ledger/sync wire format. Bumped on any breaking change,
 /// because hashes must be identical on every platform.

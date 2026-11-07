@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::PROTOCOL_VERSION;
-use crate::bytes::{Blob, EdgeId, Hash, NodeId, PubKey, Salt, Sig};
+use crate::bytes::{Blob, EdgeId, Hash, NodeId, PubKey, RuleId, Salt, Sig};
 use crate::edge::EdgeKind;
 use crate::kind;
 use crate::merkle;
@@ -53,17 +53,28 @@ pub enum Op {
         kind: EdgeKind,
     },
     /// The human accepted an AI proposal: a new node that derives from `proposal.goal`.
-    AcceptProposal { proposal: Proposal },
+    AcceptProposal {
+        proposal: Proposal,
+    },
     /// The human rejected an AI proposal. The graph stays as it is; the decision is kept.
-    RejectProposal { proposal: Proposal },
+    RejectProposal {
+        proposal: Proposal,
+    },
     /// Marks a node as sensitive (or not): sensitive nodes never leave the home network.
     /// A separate entry, not a node field, so nodes keep the same shape everywhere.
-    MarkSensitive { node: NodeId, sensitive: bool },
+    MarkSensitive {
+        node: NodeId,
+        sensitive: bool,
+    },
     /// Deletion marker (E2). The node disappears; if it is deletable (E3), devices also
     /// remove the content of every entry that shaped it.
-    DeleteNode { node: NodeId },
+    DeleteNode {
+        node: NodeId,
+    },
     /// Removes a connection. The `Link` entry stays, it has no content.
-    Unlink { edge: EdgeId },
+    Unlink {
+        edge: EdgeId,
+    },
     /// Whether a node is deletable and exportable (E3). Can be tightened and loosened later;
     /// every change is a new entry.
     SetPolicy {
@@ -85,6 +96,16 @@ pub enum Op {
         last_seq: u64,
         person: PubKey,
         sig: Sig,
+    },
+    /// E4: from now on, nodes containing one of the keywords are sensitive. Accepted by the
+    /// human, possibly suggested by `model`. Never removable content: rules carry proof.
+    AddSensitivityRule {
+        label: String,
+        keywords: Vec<String>,
+        model: Option<String>,
+    },
+    RemoveSensitivityRule {
+        rule: RuleId,
     },
 }
 
@@ -160,6 +181,16 @@ impl Op {
                 enc(&(device, last_seq, person, sig)),
                 None,
             ),
+            Op::AddSensitivityRule {
+                label,
+                keywords,
+                model,
+            } => (
+                kind::ADD_SENSITIVITY_RULE,
+                enc(&(label, keywords, model)),
+                None,
+            ),
+            Op::RemoveSensitivityRule { rule } => (kind::REMOVE_SENSITIVITY_RULE, enc(rule), None),
         }
     }
 }
@@ -333,6 +364,15 @@ impl LedgerEntry {
                     sig,
                 }
             }
+            kind::ADD_SENSITIVITY_RULE => {
+                let (label, keywords, model) = dec(p)?;
+                Op::AddSensitivityRule {
+                    label,
+                    keywords,
+                    model,
+                }
+            }
+            kind::REMOVE_SENSITIVITY_RULE => Op::RemoveSensitivityRule { rule: dec(p)? },
             other => return Err(Decode::Unknown(other)),
         })
     }

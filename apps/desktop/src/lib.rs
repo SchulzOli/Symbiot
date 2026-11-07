@@ -5,10 +5,10 @@ use std::sync::{Arc, Mutex};
 
 use symbiot_ai::{Advisor, Info};
 use symbiot_core::{
-    Edge, EdgeId, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal, PubKey,
-    VerifyReport,
+    Edge, EdgeId, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal, PubKey, Rule,
+    RuleId, VerifyReport,
 };
-use symbiot_store::{DeviceInfo, Store};
+use symbiot_store::{DeviceInfo, Sensitivity, Store};
 use tauri::{Manager, State};
 
 struct AppStore(Arc<Mutex<Store>>);
@@ -169,6 +169,54 @@ fn verify_ledger(store: State<AppStore>) -> Result<VerifyReport, String> {
 #[tauri::command]
 fn verify_all(store: State<AppStore>) -> Result<Vec<VerifyReport>, String> {
     store.with(|s| s.verify_all())
+}
+
+/// E4: why a node is sensitive or not.
+#[tauri::command]
+fn node_sensitivity(store: State<AppStore>, id: NodeId) -> Result<Sensitivity, String> {
+    store.with(|s| s.sensitivity(id))
+}
+
+#[tauri::command]
+fn list_rules(store: State<AppStore>) -> Result<Vec<Rule>, String> {
+    store.with(|s| s.rules())
+}
+
+#[tauri::command]
+fn add_rule(
+    store: State<AppStore>,
+    label: String,
+    keywords: Vec<String>,
+    model: Option<String>,
+) -> Result<Rule, String> {
+    store.with(|s| s.add_rule(&label, &keywords, model))
+}
+
+#[tauri::command]
+fn remove_rule(store: State<AppStore>, id: RuleId) -> Result<(), String> {
+    store.with(|s| s.remove_rule(id))
+}
+
+/// E4: the local model suggests rules. Writes nothing; runs off the UI thread.
+#[tauri::command]
+async fn suggest_rules(
+    store: State<'_, AppStore>,
+    ai: State<'_, Ai>,
+) -> Result<Vec<symbiot_ai::RuleProposal>, String> {
+    let advisor =
+        ai.0.clone()
+            .ok_or_else(|| symbiot_ai::Error::NotConfigured.to_string())?;
+    let ctx = store.with(|s| {
+        Ok(symbiot_ai::rule_context(
+            &s.nodes(None)?,
+            &s.rules()?,
+            &s.sensitive_nodes()?,
+        ))
+    })?;
+    tauri::async_runtime::spawn_blocking(move || advisor.suggest_rules(&ctx))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[derive(serde::Serialize)]
@@ -401,7 +449,12 @@ pub fn run() {
             sync_now,
             set_sync_url,
             sync_status,
-            verify_all
+            verify_all,
+            node_sensitivity,
+            list_rules,
+            add_rule,
+            remove_rule,
+            suggest_rules
         ])
         .run(tauri::generate_context!())
         .expect("error while running Symbiot");
