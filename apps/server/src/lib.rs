@@ -13,9 +13,10 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use symbiot_ai::Advisor;
 use symbiot_core::{
-    Edge, EdgeId, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal, PubKey,
+    Edge, EdgeId, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal, PubKey, Rule,
+    RuleId,
 };
-use symbiot_store::{ChainHead, DeviceInfo, Store, VerifyReport};
+use symbiot_store::{ChainHead, DeviceInfo, Sensitivity as NodeSensitivity, Store, VerifyReport};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
@@ -49,6 +50,10 @@ pub fn app(store: Store, ui_dir: Option<PathBuf>, ai: Option<Arc<dyn Advisor>>) 
         .route("/nodes/{id}/sensitive", put(set_sensitive))
         .route("/nodes/{id}/propose", post(propose))
         .route("/sensitive", get(list_sensitive))
+        .route("/nodes/{id}/sensitivity", get(sensitivity))
+        .route("/rules", get(list_rules).post(add_rule))
+        .route("/rules/suggest", post(suggest_rules))
+        .route("/rules/{id}", delete(remove_rule))
         .route("/proposals/accept", post(accept_proposal))
         .route("/proposals/reject", post(reject_proposal))
         .route("/ai", get(ai_info))
@@ -241,6 +246,70 @@ async fn set_sensitive(
 
 async fn list_sensitive(State(s): State<Shared>) -> Result<Json<Vec<NodeId>>, ApiError> {
     Ok(Json(lock(&s).sensitive_nodes()?))
+}
+
+/// E4: why a node is sensitive or not.
+async fn sensitivity(
+    State(s): State<Shared>,
+    Path(id): Path<String>,
+) -> Result<Json<NodeSensitivity>, ApiError> {
+    Ok(Json(lock(&s).sensitivity(parse_id(&id)?)?))
+}
+
+async fn list_rules(State(s): State<Shared>) -> Result<Json<Vec<Rule>>, ApiError> {
+    Ok(Json(lock(&s).rules()?))
+}
+
+#[derive(Deserialize)]
+pub struct NewRule {
+    pub label: String,
+    pub keywords: Vec<String>,
+    /// The model that suggested it, if it came from the AI.
+    pub model: Option<String>,
+}
+
+/// E4: the human accepts a rule (their own, or one the AI suggested).
+async fn add_rule(
+    State(s): State<Shared>,
+    Json(r): Json<NewRule>,
+) -> Result<(StatusCode, Json<Rule>), ApiError> {
+    let rule = lock(&s).add_rule(&r.label, &r.keywords, r.model)?;
+    tracing::info!(id = %rule.id, keywords = rule.keywords.len(), "sensitivity rule added");
+    Ok((StatusCode::CREATED, Json(rule)))
+}
+
+async fn remove_rule(
+    State(s): State<Shared>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let id = RuleId::from_hex(&id).ok_or(ApiError::bad("ungültige Regel-ID"))?;
+    lock(&s).remove_rule(id)?;
+    tracing::info!(%id, "sensitivity rule removed");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// E4: the local model suggests rules. Writes nothing.
+async fn suggest_rules(
+    State(s): State<Shared>,
+) -> Result<Json<Vec<symbiot_ai::RuleProposal>>, ApiError> {
+    let ai = s.ai.clone().ok_or(symbiot_ai::Error::NotConfigured)?;
+    let ctx = {
+        let store = lock(&s);
+        let (nodes, rules, sensitive) =
+            (store.nodes(None)?, store.rules()?, store.sensitive_nodes()?);
+        symbiot_ai::rule_context(&nodes, &rules, &sensitive)
+    };
+    let shown = ctx.nodes.len();
+    let rules = tokio::task::spawn_blocking(move || ai.suggest_rules(&ctx))
+        .await
+        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "interner Fehler".into()))??;
+    // Only metadata in the log.
+    tracing::info!(
+        nodes = shown,
+        suggested = rules.len(),
+        "sensitivity rules suggested"
+    );
+    Ok(Json(rules))
 }
 
 async fn ai_info(State(s): State<Shared>) -> Json<symbiot_ai::Info> {

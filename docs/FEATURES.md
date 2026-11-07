@@ -48,7 +48,10 @@ Die KI schlägt den nächsten Schritt vor, ich entscheide.
   Sensibel markieren geht mit einem Klick an jedem Knoten (`Op::MarkSensitive`, E4); für ein externes Modell
   bleiben sensible Knoten aus dem Kontext, ein sensibles Ziel wird gar nicht gesendet.
   Tests: `apps/server/tests/api.rs` (Fake-KI), `crates/symbiot-ai`, `e2e/tests/mitdenken.spec.ts` (Schein-LLM).
-  Noch offen aus E4: Regel-Vorschläge der KI für Sensibilität.
+  ✅ E4: Regeln für Sensibles. Das lokale Modell schlägt Regeln vor (Name + Stichwörter); welche Knoten sie
+  treffen, rechnet Symbiot selbst nach. Erst „Annehmen“ schreibt `Op::AddSensitivityRule` in die Kette, danach gilt
+  die Regel überall gleich, auch für spätere Knoten. Markierung von Hand gilt vor jeder Regel.
+  Tests: `crates/symbiot-core` (`sensitivity_rules`), `apps/server/tests/api.rs`, `e2e/tests/sensibel.spec.ts`.
 
 ## F5 — Synchron *(M4)*
 Ein Gedächtnis auf allen Geräten.

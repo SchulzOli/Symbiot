@@ -11,6 +11,8 @@ pub const MARK_SENSITIVE: u16 = 6;
 pub const DELETE_NODE: u16 = 7;
 pub const UNLINK: u16 = 8;
 pub const SET_POLICY: u16 = 9;
+pub const ADD_SENSITIVITY_RULE: u16 = 10;
+pub const REMOVE_SENSITIVITY_RULE: u16 = 11;
 
 // Reserved for what comes with adapters, sync and sensors (E5, E7, E13).
 pub const SET_RETENTION: u16 = 16;

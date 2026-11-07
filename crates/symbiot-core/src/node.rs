@@ -7,10 +7,11 @@ use core::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::bytes::{EdgeId, Hash, NodeId, PubKey};
+use crate::bytes::{EdgeId, Hash, NodeId, PubKey, RuleId};
 use crate::edge::{Edge, EdgeKind};
 use crate::ledger::{Decode, LedgerEntry, Op};
 use crate::proposal::Proposal;
+use crate::rule::{self, Rule};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -103,6 +104,9 @@ impl Default for Policy {
 pub enum ApplyError {
     UnknownNode(NodeId),
     UnknownEdge(EdgeId),
+    UnknownRule(RuleId),
+    /// A rule needs a name and at least one keyword of three or more letters (E4).
+    EmptyRule,
     SelfLink,
     DuplicateEdge,
     /// A proposal must name the nodes it is based on.
@@ -117,6 +121,10 @@ impl fmt::Display for ApplyError {
         match self {
             ApplyError::UnknownNode(id) => write!(f, "Knoten {id} existiert nicht"),
             ApplyError::UnknownEdge(id) => write!(f, "Verbindung {id} existiert nicht"),
+            ApplyError::UnknownRule(id) => write!(f, "Regel {id} existiert nicht"),
+            ApplyError::EmptyRule => f.write_str(
+                "Eine Regel braucht einen Namen und Stichwörter mit mindestens drei Buchstaben",
+            ),
             ApplyError::SelfLink => {
                 f.write_str("Ein Knoten kann nicht mit sich selbst verbunden werden")
             }
@@ -154,6 +162,9 @@ pub enum Change {
     Unlinked(EdgeId),
     /// A device was certified or revoked (E5): nothing changes in the graph.
     Device,
+    /// E4: a rule for what is sensitive was added or removed.
+    Rule(Rule),
+    RuleRemoved(RuleId),
     Policy {
         node: NodeId,
         policy: Policy,
@@ -169,6 +180,7 @@ pub trait Lookup {
     /// Whether the same connection already exists.
     fn has_edge(&self, from: &NodeId, to: &NodeId, kind: EdgeKind) -> bool;
     fn policy(&self, id: &NodeId) -> Policy;
+    fn rule(&self, id: &RuleId) -> Option<Rule>;
 }
 
 impl Change {
@@ -259,6 +271,29 @@ impl Change {
             }
             // Which devices count is decided by `Trust`, not by the graph.
             Op::CertifyDevice { .. } | Op::RevokeDevice { .. } => Ok(Change::Device),
+            Op::AddSensitivityRule {
+                label,
+                keywords,
+                model,
+            } => {
+                // Only clean rules are written, so every device applies exactly these words.
+                let clean = rule::clean_keywords(keywords);
+                if label.trim().is_empty() || clean.is_empty() || clean != *keywords {
+                    return Err(ApplyError::EmptyRule);
+                }
+                Ok(Change::Rule(Rule {
+                    id: RuleId::from_entry_hash(&e.hash),
+                    label: label.trim().into(),
+                    keywords: clean,
+                    model: model.clone(),
+                    author,
+                    created_ms: ts_ms,
+                }))
+            }
+            Op::RemoveSensitivityRule { rule } => {
+                view.rule(rule).ok_or(ApplyError::UnknownRule(*rule))?;
+                Ok(Change::RuleRemoved(*rule))
+            }
             Op::MarkSensitive {
                 node: id,
                 sensitive,
@@ -388,9 +423,13 @@ pub fn replay(chains: &[&[LedgerEntry]], accepts: impl Fn(&PubKey, u64) -> bool)
 pub struct State {
     pub nodes: BTreeMap<NodeId, Node>,
     pub edges: BTreeMap<EdgeId, Edge>,
+    /// Effective: marked by hand, or matched by a rule and not unmarked by hand (E4).
     pub sensitive: BTreeSet<NodeId>,
     /// Only nodes whose policy differs from the default.
     pub policies: BTreeMap<NodeId, Policy>,
+    /// Marked or unmarked by hand; wins over every rule.
+    pub by_hand: BTreeMap<NodeId, bool>,
+    pub rules: BTreeMap<RuleId, Rule>,
 }
 
 impl Lookup for State {
@@ -411,14 +450,37 @@ impl Lookup for State {
     fn policy(&self, id: &NodeId) -> Policy {
         self.policies.get(id).copied().unwrap_or_default()
     }
+
+    fn rule(&self, id: &RuleId) -> Option<Rule> {
+        self.rules.get(id).cloned()
+    }
 }
 
 impl State {
+    fn refresh_sensitive(&mut self, id: &NodeId) {
+        let Some(node) = self.nodes.get(id) else {
+            return;
+        };
+        if rule::is_sensitive(node, self.by_hand.get(id).copied(), self.rules.values()) {
+            self.sensitive.insert(*id);
+        } else {
+            self.sensitive.remove(id);
+        }
+    }
+
+    fn refresh_all_sensitive(&mut self) {
+        let ids: Vec<NodeId> = self.nodes.keys().copied().collect();
+        for id in &ids {
+            self.refresh_sensitive(id);
+        }
+    }
+
     pub fn apply(&mut self, e: &LedgerEntry) -> Result<Change, ApplyError> {
         let change = Change::of(e, self)?;
         match &change {
             Change::Node(n) => {
                 self.nodes.insert(n.id, n.clone());
+                self.refresh_sensitive(&n.id);
             }
             Change::Edge(x) => {
                 self.edges.insert(x.id, x.clone());
@@ -426,20 +488,27 @@ impl State {
             Change::Accepted { node, edge } => {
                 self.nodes.insert(node.id, node.clone());
                 self.edges.insert(edge.id, edge.clone());
+                self.refresh_sensitive(&node.id);
             }
             Change::Rejected | Change::Device => {}
             Change::Sensitivity { node, sensitive } => {
-                if *sensitive {
-                    self.sensitive.insert(*node);
-                } else {
-                    self.sensitive.remove(node);
-                }
+                self.by_hand.insert(*node, *sensitive);
+                self.refresh_sensitive(node);
+            }
+            Change::Rule(r) => {
+                self.rules.insert(r.id, r.clone());
+                self.refresh_all_sensitive();
+            }
+            Change::RuleRemoved(id) => {
+                self.rules.remove(id);
+                self.refresh_all_sensitive();
             }
             Change::Deleted { node, .. } => {
                 self.nodes.remove(node);
                 self.edges.retain(|_, x| x.from != *node && x.to != *node);
                 self.sensitive.remove(node);
                 self.policies.remove(node);
+                self.by_hand.remove(node);
             }
             Change::Unlinked(edge) => {
                 self.edges.remove(edge);
@@ -950,6 +1019,111 @@ mod tests {
         assert!(
             r.skipped.is_empty(),
             "not counting is not the same as failing"
+        );
+    }
+
+    /// E4: an accepted rule marks matching nodes, also later ones; by hand wins; removing
+    /// the rule takes its marks back.
+    #[test]
+    fn sensitivity_rules() {
+        let s = Signer::from_seed([41; 32]);
+        let mut st = State::default();
+        let mut chain: Vec<LedgerEntry> = Vec::new();
+        let mut push = |st: &mut State, op: Op| {
+            let e = s.append(chain.last(), chain.len() as u64, op);
+            chain.push(e.clone());
+            st.apply(&e)
+        };
+        let create = |title: &str| Op::CreateNode {
+            kind: NodeKind::Reflection,
+            title: title.into(),
+            body: String::new(),
+        };
+        let id_of = |c: Result<Change, ApplyError>| match c.unwrap() {
+            Change::Node(n) => n.id,
+            other => panic!("{other:?}"),
+        };
+        let doctor = id_of(push(&mut st, create("Arzttermin Dienstag")));
+        let run = id_of(push(&mut st, create("Laufen")));
+
+        // Rules must be clean: lower case, three letters or more.
+        let dirty = Op::AddSensitivityRule {
+            label: "Gesundheit".into(),
+            keywords: alloc::vec!["Arzt".into()],
+            model: None,
+        };
+        assert_eq!(push(&mut st, dirty), Err(ApplyError::EmptyRule));
+        let empty = Op::AddSensitivityRule {
+            label: " ".into(),
+            keywords: alloc::vec!["arzt".into()],
+            model: None,
+        };
+        assert_eq!(push(&mut st, empty), Err(ApplyError::EmptyRule));
+
+        let Ok(Change::Rule(r)) = push(
+            &mut st,
+            Op::AddSensitivityRule {
+                label: "Gesundheit".into(),
+                keywords: alloc::vec!["arzt".into(), "befund".into()],
+                model: Some("qwen3:8b".into()),
+            },
+        ) else {
+            panic!()
+        };
+        assert!(st.sensitive.contains(&doctor), "„arzt“ finds „Arzttermin“");
+        assert!(!st.sensitive.contains(&run));
+
+        // Later nodes and edits are checked too.
+        let report = id_of(push(&mut st, create("Befund abholen")));
+        assert!(st.sensitive.contains(&report));
+        push(
+            &mut st,
+            Op::UpdateNode {
+                node: run,
+                title: "Laufen, Arzt sagt ok".into(),
+                body: String::new(),
+                base: None,
+            },
+        )
+        .unwrap();
+        assert!(st.sensitive.contains(&run));
+
+        // By hand wins over the rule.
+        push(
+            &mut st,
+            Op::MarkSensitive {
+                node: run,
+                sensitive: false,
+            },
+        )
+        .unwrap();
+        assert!(!st.sensitive.contains(&run));
+
+        // Removing the rule takes its marks back; marks by hand stay.
+        push(
+            &mut st,
+            Op::MarkSensitive {
+                node: report,
+                sensitive: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            push(&mut st, Op::RemoveSensitivityRule { rule: r.id }),
+            Ok(Change::RuleRemoved(r.id))
+        );
+        assert_eq!(st.sensitive.iter().copied().collect::<Vec<_>>(), [report]);
+        assert_eq!(
+            push(&mut st, Op::RemoveSensitivityRule { rule: r.id }),
+            Err(ApplyError::UnknownRule(r.id))
+        );
+    }
+
+    #[test]
+    fn keywords_are_cleaned() {
+        assert_eq!(
+            crate::rule::clean_keywords([" Arzt ", "arzt", "ei", "Befund"]),
+            ["arzt", "befund"]
         );
     }
 }
