@@ -6,7 +6,7 @@
 Commit auf main ─► GitHub Actions: CI (fmt · clippy · test · no_std · WASM · Desktop)
                 └► Image: ghcr.io/schulzoli/symbiot-server:{main, sha-…}
                           │
-                Komodo auf heimserver („Poll for Updates“ + „Auto Update“) zieht :main, startet neu
+                Komodo auf heimserver („Poll for Updates“ + „Auto Update“) zieht :main nachts, startet neu
                           │
                 https://heimserver.example.ts.net:8449  (nur Tailnet)
 
@@ -47,9 +47,10 @@ Die Geräte gleichen über heimserver ab. Auf heimserver selbst ist nichts einzu
 
 1. **heimserver bestätigen:** `https://heimserver.example.ts.net:8449` öffnen, unter „Geräte“ den Personen-Schlüssel
    anlegen. Die 24 Wörter aufschreiben oder in den Passwort-Manager legen; sie werden nirgends gespeichert.
-2. **Desktop:** `SYMBIOT_SYNC_URL=https://heimserver.example.ts.net:8449` setzen und die App starten. Unter „Geräte“
-   „Vorhandenen Schlüssel eingeben“, Namen vergeben. Die App gleicht danach jede Minute ab, oder mit
-   „Jetzt abgleichen“.
+2. **Desktop:** Unter „Geräte“ (steht oben, solange das Gerät nicht eingerichtet ist) „Vorhandenen Schlüssel
+   eingeben“ und einen Namen vergeben, dann bei „Adresse von heimserver“ `https://heimserver.example.ts.net:8449` eintragen
+   und speichern. Die App merkt sich die Adresse (`sync-url.txt` im Datenordner) und gleicht jede Minute ab,
+   oder mit „Jetzt abgleichen“. `SYMBIOT_SYNC_URL` gilt nur, solange in der App keine Adresse gespeichert ist.
 3. **Verlorenes Gerät:** auf einem anderen Gerät unter „Geräte“ widerrufen (braucht die Wörter).
 
 Im Log stehen nur Metadaten (Gerät, Anzahl Einträge), nie Wörter oder Inhalte. Eine Verzweigung (ein
