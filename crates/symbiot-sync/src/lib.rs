@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use symbiot_core::{LedgerEntry, PubKey, Sig, verify_message};
+use symbiot_core::{Hash, LedgerEntry, PubKey, Sig, verify_message};
 use symbiot_store::{ChainHead, Store};
 
 pub const HEADER_DEVICE: &str = "x-symbiot-device";
@@ -84,7 +84,15 @@ pub enum Error {
 pub struct Report {
     pub sent: usize,
     pub received: usize,
+    /// Files (#28) sent to and fetched from the home server.
+    #[serde(default)]
+    pub files_sent: usize,
+    #[serde(default)]
+    pub files_received: usize,
 }
+
+/// Entries per push, so a large import does not become one huge request.
+pub const PUSH_CHUNK: usize = 500;
 
 /// The home server, as seen from a device.
 pub struct Remote {
@@ -127,10 +135,10 @@ impl Remote {
         store: &Mutex<Store>,
         method: &str,
         path: &str,
-        body: Option<Vec<u8>>,
+        body: Option<(Vec<u8>, &str)>,
     ) -> Result<Vec<u8>, Error> {
         let ts = now_ms();
-        let bytes = body.unwrap_or_default();
+        let (bytes, content_type) = body.unwrap_or_default();
         let (device, sig) = {
             let s = lock(store);
             let sig = s.sign_message(&request_message(method, path, ts, &bytes));
@@ -143,10 +151,7 @@ impl Remote {
             (HEADER_SIG, sig.to_hex()),
         ];
         let result = if method == "POST" {
-            let mut req = self
-                .agent
-                .post(&url)
-                .header("content-type", "application/json");
+            let mut req = self.agent.post(&url).header("content-type", content_type);
             for (k, v) in &headers {
                 req = req.header(*k, v);
             }
@@ -163,7 +168,7 @@ impl Remote {
         let body = res
             .body_mut()
             .with_config()
-            .limit(256 * 1024 * 1024)
+            .limit(symbiot_store::MAX_FILE_BYTES + 1024 * 1024)
             .read_to_vec()
             .map_err(|e| Error::Http(e.to_string()))?;
         if status.is_success() {
@@ -207,7 +212,76 @@ impl Remote {
         };
         let path = format!("/api/sync/chains/{}", first.head.author);
         let body = serde_json::to_vec(entries).map_err(|e| Error::Http(e.to_string()))?;
-        Self::json(&self.call(store, "POST", &path, Some(body))?)
+        Self::json(&self.call(store, "POST", &path, Some((body, "application/json")))?)
+    }
+
+    /// Pushes a chain in pieces of [`PUSH_CHUNK`] entries.
+    pub fn push_all(&self, store: &Mutex<Store>, entries: &[LedgerEntry]) -> Result<usize, Error> {
+        let mut received = 0;
+        for chunk in entries.chunks(PUSH_CHUNK) {
+            received += self.push(store, chunk)?.received;
+        }
+        Ok(received)
+    }
+
+    /// #28: files the home server's raw data references but that it does not have.
+    pub fn missing_there(&self, store: &Mutex<Store>) -> Result<Vec<Hash>, Error> {
+        Self::json(&self.call(store, "GET", "/api/sync/files/missing", None)?)
+    }
+
+    pub fn upload_file(
+        &self,
+        store: &Mutex<Store>,
+        hash: &Hash,
+        bytes: Vec<u8>,
+    ) -> Result<(), Error> {
+        let path = format!("/api/sync/files/{hash}");
+        self.call(
+            store,
+            "POST",
+            &path,
+            Some((bytes, "application/octet-stream")),
+        )?;
+        Ok(())
+    }
+
+    pub fn download_file(&self, store: &Mutex<Store>, hash: &Hash) -> Result<Vec<u8>, Error> {
+        self.call(store, "GET", &format!("/api/sync/files/{hash}"), None)
+    }
+
+    /// Sends the files the home server is missing and this device has. A home server without
+    /// file support (older version) is skipped.
+    pub fn send_files(&self, store: &Mutex<Store>) -> Result<usize, Error> {
+        let Ok(wanted) = self.missing_there(store) else {
+            return Ok(0);
+        };
+        let mut sent = 0;
+        for hash in wanted {
+            let bytes = lock(store).file(&hash)?;
+            if let Some(bytes) = bytes {
+                self.upload_file(store, &hash, bytes)?;
+                sent += 1;
+            }
+        }
+        Ok(sent)
+    }
+
+    /// Fetches the files this device is missing. Files the home server does not have either
+    /// are skipped; the next round tries again.
+    pub fn fetch_files(&self, store: &Mutex<Store>) -> Result<usize, Error> {
+        let missing = lock(store).missing_files()?;
+        let mut received = 0;
+        for hash in missing {
+            match self.download_file(store, &hash) {
+                Ok(bytes) => {
+                    lock(store).put_file_checked(&hash, &bytes)?;
+                    received += 1;
+                }
+                Err(Error::Remote(_)) => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(received)
     }
 }
 
@@ -222,7 +296,7 @@ pub fn sync(store: &Mutex<Store>, remote: &Remote) -> Result<Report, Error> {
     let known_there = theirs.iter().find(|h| h.author == me).map(|h| h.seq);
     let mine = lock(store).chain_since(&me, known_there)?;
     if !mine.is_empty() {
-        report.sent = remote.push(store, &mine)?.received;
+        report.sent = remote.push_all(store, &mine)?;
     }
 
     for head in theirs.iter().filter(|h| h.author != me) {
@@ -233,6 +307,10 @@ pub fn sync(store: &Mutex<Store>, remote: &Remote) -> Result<Report, Error> {
         let entries = remote.pull(store, &head.author, here)?;
         report.received += lock(store).receive(entries)?;
     }
+
+    // #28: files after chains, so both sides know which files the raw data references.
+    report.files_sent = remote.send_files(store)?;
+    report.files_received = remote.fetch_files(store)?;
     Ok(report)
 }
 

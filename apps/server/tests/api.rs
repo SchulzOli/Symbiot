@@ -592,3 +592,75 @@ async fn evidence_search_and_origins() {
     let (_, origins) = call(&app, "GET", "/api/evidence/origins", None).await;
     assert_eq!(origins, json!([{"origin": "telegram", "count": 2}]));
 }
+
+/// #28: files of raw data for the web UI; only safe types inline, anything else as download.
+#[tokio::test]
+async fn files_for_the_web_ui() {
+    use symbiot_core::evidence::{Evidence, FileRef};
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open_in_memory(Signer::from_seed([5; 32])).unwrap();
+    store.set_files_dir(dir.path().to_path_buf());
+    let png = store.put_file(b"png").unwrap();
+    let html = store.put_file(b"<script>alert(1)</script>").unwrap();
+    let file = |hash, name: &str, mime: &str| FileRef {
+        hash,
+        name: name.into(),
+        mime: mime.into(),
+        len: 3,
+    };
+    store
+        .record_evidence(vec![Evidence {
+            id: "mail:x@example.org".into(),
+            kind: "schema:EmailMessage".into(),
+            at_ms: 1,
+            actors: vec![],
+            text: String::new(),
+            fields: vec![],
+            files: vec![
+                file(png, "see.png", "image/png"),
+                file(html, "seite.html", "text/html"),
+            ],
+        }])
+        .unwrap();
+    let app = symbiot_server::app(store, None, None);
+    let get = |uri: String| {
+        let app = app.clone();
+        async move {
+            let res = app
+                .oneshot(Request::get(uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            let h = res.headers().clone();
+            let body = res.into_body().collect().await.unwrap().to_bytes();
+            (h, body)
+        }
+    };
+    let (h, body) = get(format!("/api/files/{png}")).await;
+    assert_eq!(&body[..], b"png");
+    assert_eq!(h["content-type"], "image/png");
+    assert!(
+        h["content-disposition"]
+            .to_str()
+            .unwrap()
+            .starts_with("inline")
+    );
+    assert_eq!(h["content-security-policy"], "sandbox");
+
+    let (h, _) = get(format!("/api/files/{html}")).await;
+    assert_eq!(h["content-type"], "application/octet-stream");
+    assert!(
+        h["content-disposition"]
+            .to_str()
+            .unwrap()
+            .starts_with("attachment")
+    );
+
+    let (status, _) = call(
+        &app,
+        "GET",
+        &format!("/api/files/{}", "00".repeat(32)),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

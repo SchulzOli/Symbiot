@@ -15,7 +15,7 @@ liest nur Belege und fragt nie eine Quelle. Dieses Format ist das Einzige, was b
 | `actors` | Personen, wie die Quelle sie nennt: Kennung mit Schema, Rolle und angezeigter Name (leer, wenn unbekannt) | `mailto:a@b.de` als `from` mit Name „Anna B.“, `tel:+4930…` als `to` |
 | `text` | der Text, unverändert; leer, wenn es keinen gibt | |
 | `fields` | weitere Felder der Quelle als Paare | `("subject", …)`, `("thread", …)`, `("url", …)` |
-| `files` | angehängte Dateien: SHA-256, Name, MIME-Typ, Größe | Die Datei selbst liegt im Datei-Speicher (#28). |
+| `files` | angehängte Dateien: SHA-256, Name, MIME-Typ, Größe | Die Datei selbst liegt im Datei-Speicher. |
 
 **Personen-Schemata:** `tel:`, `mailto:`, `telegram:`, `whatsapp:`, `github:`, `steam:`, und `name:` nur dann, wenn
 die Quelle nichts anderes hat. Personen zusammenzuführen ist Aufgabe der Aufbereitung, nicht des Adapters.
@@ -81,8 +81,21 @@ symbiot-import git ~/code/symbiot
   jedem Import desselben Chats gleich lassen.
 - WhatsApp hat keine Nachrichten-Kennungen. Der Fingerabdruck aus Zeit, Absender und Text bleibt bei einem neuen
   Export desselben Chats gleich.
-- Anhänge stehen vorerst nur mit Namen in den Feldern (`attachment`). Die Dateien selbst kommen mit dem
-  Datei-Speicher (#28).
+- **Anhänge** kommen in den Datei-Speicher: Telegram-Fotos und -Dateien neben `result.json`, WhatsApp-Medien neben
+  der `.txt` (Export „mit Medien“), Anhänge aus Mails. Nicht exportierte Medien bleiben ein Name im Feld
+  `attachment`. Dateien über 512 MB werden ausgelassen.
+
+## Dateien
+
+- **Ort:** `files/<zwei Zeichen>/<sha256>` neben der Datenbank. Jede Datei liegt nur einmal da, wie oft sie auch
+  vorkommt. Beim Lesen wird sie gegen ihren Hash geprüft.
+- **Abgleich:** Nach den Ketten tauschen Gerät und Heimserver die Dateien aus, die ihre Rohdaten nennen, die
+  andere Seite aber noch nicht hat. Ketten gehen in Stücken zu 500 Einträgen. Der Heimserver nimmt nur Dateien
+  an, auf die Rohdaten verweisen, und prüft den Hash.
+- **Anzeigen:** Fotos (PNG, JPEG, GIF, WebP) zeigt die Zeitleiste direkt an, andere Dateien als Link zum
+  Herunterladen. Der Server liefert alle anderen Typen nur als Download aus (`Content-Security-Policy: sandbox`),
+  damit ein Anhang von außen nie als Seite der App laufen kann. In der Desktop-App erscheinen Fotos bis 8 MB.
+- **Löschen (E2):** `prune_files` entfernt Dateien, auf die keine Rohdaten mit Inhalt mehr verweisen.
 
 ## Ansehen und suchen
 
@@ -97,4 +110,6 @@ vorkommen, Wortanfänge genügen. Die Filter-Knöpfe beschränken die Liste auf 
 
 - Einzelne Belege löschen (das Entfernen eines Teils statt des ganzen Bündels). Kommt mit „Aufgeräumt“ (E13).
 - Freigabe pro Adapter (`Grant`, E7, E10). Bis dahin gilt: Ein Adapter ist ein bestätigtes Gerät der Person.
-- Datei-Speicher (#28), Live-Adapter (M9).
+- Live-Adapter (M9).
+- Dateien sind wie die Datenbank noch unverschlüsselt (E6, #22).
+- Jedes Gerät lädt beim Abgleich alle fehlenden Dateien. Eine Auswahl (z. B. Fotos nur auf dem Heimserver) fehlt.

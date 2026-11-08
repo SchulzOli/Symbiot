@@ -5,10 +5,11 @@
 //! [`symbiot_store::Store::record_evidence`] into the adapter's own store, so each adapter is a
 //! device with its own chain (E7). Format: `docs/ROHDATEN.md`.
 
-use std::path::Path;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
-use symbiot_core::Evidence;
+use symbiot_core::{Evidence, FileRef, Hash};
 
 pub mod git;
 pub mod mbox;
@@ -28,6 +29,29 @@ pub enum Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// What an adapter read: the raw data and the files it references (#28). The caller stores
+/// the files first, then the raw data.
+#[derive(Debug, Default)]
+pub struct Import {
+    pub items: Vec<Evidence>,
+    pub files: Vec<PendingFile>,
+}
+
+/// A file to put into the file store, with the hash the raw data uses for it.
+#[derive(Debug)]
+pub struct PendingFile {
+    pub hash: Hash,
+    pub data: FileData,
+}
+
+#[derive(Debug)]
+pub enum FileData {
+    /// A file next to the export (photos of a chat export); copied, never read whole.
+    Path(PathBuf),
+    /// Bytes from inside the export (mail attachments).
+    Bytes(Vec<u8>),
+}
 
 /// The sources this crate can read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,22 +96,110 @@ impl Source {
         Self::ALL.into_iter().find(|x| x.name() == s)
     }
 
-    /// Reads the source at `path`.
-    pub fn read(self, path: &Path, opts: &Options) -> Result<Vec<Evidence>> {
+    /// Reads the source at `path`. Files next to an export (photos, media) are found relative
+    /// to the export's folder.
+    pub fn read(self, path: &Path, opts: &Options) -> Result<Import> {
+        let dir = path.parent();
         match self {
-            Source::Telegram => telegram::parse(&std::fs::read_to_string(path)?),
+            Source::Telegram => telegram::parse(&std::fs::read_to_string(path)?, dir),
             Source::WhatsApp => {
                 let chat = opts.chat.clone().unwrap_or_else(|| {
                     path.file_stem()
                         .map(|s| s.to_string_lossy().into_owned())
                         .unwrap_or_else(|| "chat".into())
                 });
-                whatsapp::parse(&std::fs::read_to_string(path)?, &chat, opts.utc_offset_min)
+                whatsapp::parse(
+                    &std::fs::read_to_string(path)?,
+                    &chat,
+                    opts.utc_offset_min,
+                    dir,
+                )
             }
             Source::Mbox => mbox::parse(std::io::BufReader::new(std::fs::File::open(path)?)),
             Source::Git => git::read(path),
         }
     }
+}
+
+/// The MIME type for a file name, from its extension.
+pub fn mime_of(name: &str) -> &'static str {
+    let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+    match ext.as_deref() {
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("png") => "image/png",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("heic") => "image/heic",
+        Some("mp4") => "video/mp4",
+        Some("mov") => "video/quicktime",
+        Some("opus" | "ogg" | "oga") => "audio/ogg",
+        Some("mp3") => "audio/mpeg",
+        Some("m4a") => "audio/mp4",
+        Some("pdf") => "application/pdf",
+        Some("txt") => "text/plain",
+        Some("vcf") => "text/vcard",
+        _ => "application/octet-stream",
+    }
+}
+
+/// A file next to an export: hashed without reading it whole. `None` if it is not there or
+/// too large for the file store.
+pub(crate) fn file_at(
+    path: &Path,
+    name: &str,
+    mime: Option<&str>,
+) -> Option<(FileRef, PendingFile)> {
+    let mut f = std::fs::File::open(path).ok()?;
+    if !f.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut h = Sha256::new();
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut len = 0u64;
+    loop {
+        let n = f.read(&mut buf).ok()?;
+        if n == 0 {
+            break;
+        }
+        len += n as u64;
+        if len > symbiot_store::MAX_FILE_BYTES {
+            return None;
+        }
+        h.update(&buf[..n]);
+    }
+    let hash = Hash(h.finalize().into());
+    Some((
+        FileRef {
+            hash,
+            name: name.into(),
+            mime: mime.unwrap_or_else(|| mime_of(name)).into(),
+            len,
+        },
+        PendingFile {
+            hash,
+            data: FileData::Path(path.to_path_buf()),
+        },
+    ))
+}
+
+/// A file from inside an export.
+pub(crate) fn file_of(bytes: Vec<u8>, name: &str, mime: &str) -> Option<(FileRef, PendingFile)> {
+    if bytes.len() as u64 > symbiot_store::MAX_FILE_BYTES {
+        return None;
+    }
+    let hash = Hash(Sha256::digest(&bytes).into());
+    Some((
+        FileRef {
+            hash,
+            name: name.into(),
+            mime: mime.into(),
+            len: bytes.len() as u64,
+        },
+        PendingFile {
+            hash,
+            data: FileData::Bytes(bytes),
+        },
+    ))
 }
 
 /// A short, stable fingerprint for ids of sources without their own ids.

@@ -19,6 +19,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["json", "env-filter"] }
 
 [dev-dependencies]
+tempfile = "3.27.0"
 http-body-util = "0.1.5"
 tower = { version = "0.5.3", features = ["util"] }
 ureq = { version = "3.5.0", features = ["json"] }

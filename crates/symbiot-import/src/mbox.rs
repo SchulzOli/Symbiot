@@ -9,11 +9,13 @@ use mail_parser::mailbox::mbox::MessageIterator;
 use mail_parser::{AddressList, MessageParser};
 use symbiot_core::evidence::{Actor, Evidence, role};
 
-use crate::{Error, Result, fingerprint};
+use crate::{Error, Import, Result, file_of, fingerprint};
 
-pub fn parse(reader: impl BufRead) -> Result<Vec<Evidence>> {
+/// Attachments go into the file store; the raw data names them with their hash.
+pub fn parse(reader: impl BufRead) -> Result<Import> {
     let parser = MessageParser::default();
     let mut out = Vec::new();
+    let mut pending = Vec::new();
     let mut any = false;
     for raw in MessageIterator::new(reader) {
         let raw = raw?;
@@ -49,9 +51,21 @@ pub fn parse(reader: impl BufRead) -> Result<Vec<Evidence>> {
                 format!("mail:{}", parent.trim_matches(['<', '>'])),
             ));
         }
+        let mut files = Vec::new();
         for a in mail.attachments() {
-            if let Some(name) = a.attachment_name() {
-                fields.push(("attachment".into(), name.to_string()));
+            let name = a.attachment_name().unwrap_or("anhang").to_string();
+            fields.push(("attachment".into(), name.clone()));
+            let mime = a
+                .content_type()
+                .map(|ct| match ct.subtype() {
+                    Some(sub) => format!("{}/{sub}", ct.ctype()),
+                    None => ct.ctype().to_string(),
+                })
+                .unwrap_or_else(|| crate::mime_of(&name).to_string())
+                .to_ascii_lowercase();
+            if let Some((file, p)) = file_of(a.decoded().into_owned(), &name, &mime) {
+                files.push(file);
+                pending.push(p);
             }
         }
 
@@ -65,7 +79,7 @@ pub fn parse(reader: impl BufRead) -> Result<Vec<Evidence>> {
                 .map(|t| t.into_owned())
                 .unwrap_or_default(),
             fields,
-            files: vec![],
+            files,
         });
     }
     if !any {
@@ -73,7 +87,10 @@ pub fn parse(reader: impl BufRead) -> Result<Vec<Evidence>> {
             "keine Mail gefunden: eine mbox-Datei beginnt mit „From “".into(),
         ));
     }
-    Ok(out)
+    Ok(Import {
+        items: out,
+        files: pending,
+    })
 }
 
 fn add(actors: &mut Vec<Actor>, list: Option<AddressList<'_>>, role: &str) {
@@ -115,7 +132,7 @@ Gerne!
 
     #[test]
     fn two_mails() {
-        let items = parse(MBOX.as_bytes()).unwrap();
+        let items = parse(MBOX.as_bytes()).unwrap().items;
         assert_eq!(items.len(), 2);
         let a = &items[0];
         assert_eq!(a.id, "mail:abc@example.org");
@@ -140,7 +157,41 @@ Gerne!
                 .contains(&("in_reply_to".into(), "mail:abc@example.org".into()))
         );
         assert!(items.iter().all(|e| e.check().is_ok()));
-        assert_eq!(parse(MBOX.as_bytes()).unwrap()[1].id, b.id, "stable");
+        assert_eq!(parse(MBOX.as_bytes()).unwrap().items[1].id, b.id, "stable");
+    }
+
+    #[test]
+    fn attachment_goes_to_the_file_store() {
+        let mbox = "From a@example.org Tue Mar 12 14:05:00 2024
+Message-ID: <anhang@example.org>
+Date: Tue, 12 Mar 2024 14:05:00 +0100
+From: a@example.org
+Subject: Foto
+Content-Type: multipart/mixed; boundary=\"x\"
+
+--x
+Content-Type: text/plain
+
+Hier das Foto.
+--x
+Content-Type: image/png; name=\"see.png\"
+Content-Disposition: attachment; filename=\"see.png\"
+Content-Transfer-Encoding: base64
+
+aGFsbG8=
+--x--
+";
+        let got = parse(mbox.as_bytes()).unwrap();
+        let f = &got.items[0].files[0];
+        assert_eq!(
+            (f.name.as_str(), f.mime.as_str(), f.len),
+            ("see.png", "image/png", 5)
+        );
+        assert!(got.items[0].text.starts_with("Hier das Foto."));
+        let crate::FileData::Bytes(b) = &got.files[0].data else {
+            panic!("bytes from inside the mail");
+        };
+        assert_eq!(b, b"hallo");
     }
 
     #[test]

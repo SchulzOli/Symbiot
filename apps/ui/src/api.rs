@@ -261,6 +261,10 @@ pub async fn revoke(words: String, device: PubKey) -> ApiResult<PersonInfo> {
 pub struct SyncReport {
     pub sent: usize,
     pub received: usize,
+    #[serde(default)]
+    pub files_sent: usize,
+    #[serde(default)]
+    pub files_received: usize,
 }
 
 /// Where syncing with the home server stands — only in the app; the home server itself is where devices sync.
@@ -372,6 +376,30 @@ pub async fn list_evidence(filter: EvidenceFilter) -> ApiResult<Vec<StoredEviden
     }
     let url = format!("/api/evidence?{}", params.join("&"));
     http_json(gloo_net::http::Request::get(&url).build()).await
+}
+
+/// #28: types the UI shows as a picture. The same list as the server's inline types.
+pub fn is_picture(mime: &str) -> bool {
+    matches!(
+        mime,
+        "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+    )
+}
+
+/// Where the browser loads a file from. `None` in the app: there files come by `invoke`.
+pub fn file_url(hash: &Hash) -> Option<String> {
+    tauri_invoke_fn()
+        .is_none()
+        .then(|| format!("/api/files/{hash}"))
+}
+
+/// In the app: a picture as `data:` URL, `None` if it is not here (yet) or too large.
+pub async fn file_data_url(hash: Hash) -> ApiResult<Option<String>> {
+    #[derive(Serialize)]
+    struct Args {
+        hash: Hash,
+    }
+    invoke("file_data_url", &Args { hash }).await
 }
 
 pub async fn evidence_origins() -> ApiResult<Vec<Origin>> {
