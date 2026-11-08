@@ -106,6 +106,25 @@ vorkommen, Wortanfänge genügen. Die Filter-Knöpfe beschränken die Liste auf 
 - Server: `GET /api/evidence?q=&origin=&kind=&from=&to=&limit=&offset=` und `GET /api/evidence/origins`
 - Speicher: `evidence_fts` (SQLite FTS5, ohne eigene Kopie des Texts), Schema 6
 
+## Personen (Aufbereitung, #31)
+
+Aus den Kennungen der Rohdaten werden Personen. Der Reiter **Personen** zeigt sie mit ihren Kennungen, Quellen und
+der Zahl der Belege. „Zeitleiste zeigen“ öffnet alles von dieser Person über alle Quellen.
+
+- **Regeln** (deterministisch, auf jedem Gerät gleich, `symbiot_core::identity::normalize`): Mail-Adressen in
+  Kleinschreibung, Telefonnummern mit `00` werden zu `+`, Leerzeichen und Striche fallen weg, die
+  GitHub-Noreply-Adresse wird zum GitHub-Konto. Was danach gleich ist, ist eine Kennung.
+- **Vorschläge:** Personen mit gleichem Namen oder gleichem Vornamen unter verschiedenen Kennungen. Sie werden
+  berechnet und nicht gespeichert.
+- **Entscheidungen** sind Einträge in der Kette des Menschen (Art 27, `DecideIdentity`): *Zusammenführen*,
+  *Trennen* (eine Kennung wird wieder eigene Person), *Nicht dieselbe* (wird nicht mehr vorgeschlagen). Die
+  Kennungen stehen im entfernbaren Inhalt (E2). Spätere Entscheidungen heben frühere auf, nichts wird
+  überschrieben. Entscheidungen gleichen ab wie alles andere.
+- Personen sind keine Knoten im Graphen. Wer zu einem Ziel gehört, entscheidet weiter der Mensch.
+- Aufbereiter als eigene Geräte (E14) kommen mit den ersten nicht-deterministischen Ergebnissen (Aussagen,
+  Themen, #32). Personen brauchen sie nicht: Regeln lassen sich jederzeit neu rechnen, und alles andere entscheidet
+  der Mensch.
+
 ## Noch nicht enthalten
 
 - Einzelne Belege löschen (das Entfernen eines Teils statt des ganzen Bündels). Kommt mit „Aufgeräumt“ (E13).

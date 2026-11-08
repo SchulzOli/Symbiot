@@ -21,14 +21,17 @@ use symbiot_core::{
 /// 5: raw data (E14) in `evidence`.
 /// 6: `evidence` knows its origin, `evidence_fts` indexes the words (#30); rebuilt from the ledger.
 /// 7: `evidence_file` lists the files raw data references (#28); rebuilt from the ledger.
-const SCHEMA_VERSION: i64 = 7;
+/// 8: `evidence_actor` (identifiers per item) and `identity_decision` (#31); rebuilt.
+const SCHEMA_VERSION: i64 = 8;
 
 mod evidence;
 mod files;
+mod persons;
 mod sync;
 
 pub use evidence::{EvidenceQuery, Origin, Recorded, StoredEvidence};
 pub use files::{FileInfo, MAX_FILE_BYTES};
+pub use persons::{Identifier, Person, Suggestion};
 
 pub use symbiot_core::VerifyReport;
 pub use sync::{ChainHead, DeviceInfo, new_words};
@@ -211,10 +214,11 @@ impl Store {
                  PRIMARY KEY (author, seq, hash)
              );",
         )?;
-        if version > 0 && version < 7 {
+        if version > 0 && version < 8 {
             conn.execute_batch(evidence::DROP)?;
         }
         conn.execute_batch(evidence::SCHEMA)?;
+        conn.execute_batch(persons::SCHEMA)?;
         if version > 0 && version < SCHEMA_VERSION {
             // Only the projection changed shape; the ledger is the truth.
             let tx = conn.unchecked_transaction()?;
@@ -496,7 +500,8 @@ fn append_in(tx: &Connection, signer: &Signer, op: Op) -> Result<Change> {
         | Op::RevokeDevice { .. }
         | Op::AddSensitivityRule { .. }
         | Op::RemoveSensitivityRule { .. }
-        | Op::RecordEvidence { .. } => vec![],
+        | Op::RecordEvidence { .. }
+        | Op::DecideIdentity { .. } => vec![],
         Op::UpdateNode { node, .. }
         | Op::MarkSensitive { node, .. }
         | Op::DeleteNode { node }
@@ -539,6 +544,9 @@ fn append_in(tx: &Connection, signer: &Signer, op: Op) -> Result<Change> {
         ),
         ApplyError::Undecodable(_) => Error::Invalid("Eintrag nicht lesbar"),
         ApplyError::BadEvidence => Error::Invalid("Rohdaten verletzen das Format (E14)"),
+        ApplyError::BadIdentity => {
+            Error::Invalid("Zusammenführen braucht zwei verschiedene Kennungen mit Schema")
+        }
     })?;
 
     insert_entry(tx, &entry)?;
@@ -607,6 +615,7 @@ fn project(tx: &Connection, change: &Change) -> Result<()> {
         }
         Change::Rejected | Change::Device => {}
         Change::Evidence { .. } => evidence::project_evidence(tx, change)?,
+        Change::Identity { .. } => persons::project_identity(tx, change)?,
         Change::Sensitivity { node, sensitive } => {
             tx.execute(
                 "INSERT OR REPLACE INTO by_hand (node_id, sensitive) VALUES (?1, ?2)",
@@ -776,8 +785,17 @@ fn rebuild_projection(tx: &Connection, me: &PubKey) -> Result<()> {
     }
     tx.execute_batch(
         "DELETE FROM nodes; DELETE FROM edges; DELETE FROM sensitive; DELETE FROM policies;
-         DELETE FROM by_hand; DELETE FROM rules;",
+         DELETE FROM by_hand; DELETE FROM rules; DELETE FROM identity_decision;",
     )?;
+    for (entry, decision) in &r.state.identity {
+        persons::project_identity(
+            tx,
+            &Change::Identity {
+                entry: *entry,
+                decision: decision.clone(),
+            },
+        )?;
+    }
     for (id, sensitive) in &r.state.by_hand {
         tx.execute(
             "INSERT INTO by_hand (node_id, sensitive) VALUES (?1, ?2)",

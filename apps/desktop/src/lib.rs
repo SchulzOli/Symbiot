@@ -8,7 +8,9 @@ use symbiot_core::{
     Edge, EdgeId, EdgeKind, Hash, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal, PubKey,
     Rule, RuleId, VerifyReport,
 };
-use symbiot_store::{DeviceInfo, EvidenceQuery, Origin, Sensitivity, Store, StoredEvidence};
+use symbiot_store::{
+    DeviceInfo, EvidenceQuery, Origin, Person, Sensitivity, Store, StoredEvidence, Suggestion,
+};
 use tauri::{Manager, State};
 
 struct AppStore(Arc<Mutex<Store>>);
@@ -180,6 +182,7 @@ fn node_sensitivity(store: State<AppStore>, id: NodeId) -> Result<Sensitivity, S
 /// #30: the same filter as `GET /api/evidence`, as one argument.
 #[derive(serde::Deserialize)]
 struct EvidenceFilter {
+    person: Option<String>,
     q: Option<String>,
     origin: Option<String>,
     kind: Option<String>,
@@ -203,8 +206,47 @@ fn list_evidence(
         to_ms: filter.to,
         limit: Some(filter.limit.unwrap_or(50).min(200)),
         offset: filter.offset,
+        actors: None,
     };
-    store.with(|s| s.evidence(&q))
+    store.with(|s| {
+        let q = match blank(filter.person) {
+            None => q,
+            Some(id) => EvidenceQuery {
+                actors: Some(match s.person_of(&id)? {
+                    Some(p) => p.identifiers.into_iter().map(|i| i.id).collect(),
+                    None => vec![id],
+                }),
+                ..q
+            },
+        };
+        s.evidence(&q)
+    })
+}
+
+/// #31: persons and the human's decisions about them.
+#[tauri::command]
+fn list_persons(store: State<AppStore>) -> Result<Vec<Person>, String> {
+    store.with(|s| s.persons())
+}
+
+#[tauri::command]
+fn person_suggestions(store: State<AppStore>) -> Result<Vec<Suggestion>, String> {
+    store.with(|s| s.person_suggestions())
+}
+
+#[tauri::command]
+fn merge_identities(store: State<AppStore>, ids: Vec<String>, name: String) -> Result<(), String> {
+    store.with(|s| s.merge_identities(&ids, &name))
+}
+
+#[tauri::command]
+fn split_identity(store: State<AppStore>, id: String) -> Result<(), String> {
+    store.with(|s| s.split_identity(&id))
+}
+
+#[tauri::command]
+fn keep_apart(store: State<AppStore>, a: String, b: String) -> Result<(), String> {
+    store.with(|s| s.keep_apart(&a, &b))
 }
 
 /// Pictures up to this size are shown in the app (#28); larger ones only by name.
@@ -518,7 +560,12 @@ pub fn run() {
             suggest_rules,
             list_evidence,
             evidence_origins,
-            file_data_url
+            file_data_url,
+            list_persons,
+            person_suggestions,
+            merge_identities,
+            split_identity,
+            keep_apart
         ])
         .run(tauri::generate_context!())
         .expect("error while running Symbiot");

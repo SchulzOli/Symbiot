@@ -68,7 +68,7 @@ main {
 header h1 { margin: 0; font-size: 1.6rem; letter-spacing: -0.01em; }
 .tagline { margin: 2px 0 0; color: var(--muted); }
 
-.capture, .node, .verify {
+.capture, .node, .verify, .card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -277,3 +277,17 @@ button.link {
   border: 1px solid var(--border); object-fit: cover;
 }
 .evidence .file { font-size: 0.9rem; overflow-wrap: anywhere; }
+
+/* #31: persons */
+.persons, .person-list, .suggestions { display: grid; gap: 10px; }
+.suggestions h4 {
+  margin: 0; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+}
+.card.person, .card.suggestion { display: grid; gap: 6px; overflow-wrap: anywhere; }
+.card.suggestion p { margin: 0; }
+.identifiers { gap: 6px; }
+.identifier {
+  font-size: 0.8rem; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border);
+  color: var(--muted); display: inline-flex; gap: 6px; align-items: center;
+}
+.person > button.link { justify-self: start; }

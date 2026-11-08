@@ -341,6 +341,8 @@ pub struct Origin {
 /// Which raw data to load; empty fields do not filter.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct EvidenceFilter {
+    /// #31: any identifier of a person; the store widens it to all of theirs.
+    pub person: Option<String>,
     pub q: Option<String>,
     pub origin: Option<String>,
     pub limit: Option<usize>,
@@ -368,6 +370,9 @@ pub async fn list_evidence(filter: EvidenceFilter) -> ApiResult<Vec<StoredEviden
     if let Some(o) = filter.origin {
         add("origin", o);
     }
+    if let Some(p) = filter.person {
+        add("person", p);
+    }
     if let Some(l) = filter.limit {
         add("limit", l.to_string());
     }
@@ -376,6 +381,89 @@ pub async fn list_evidence(filter: EvidenceFilter) -> ApiResult<Vec<StoredEviden
     }
     let url = format!("/api/evidence?{}", params.join("&"));
     http_json(gloo_net::http::Request::get(&url).build()).await
+}
+
+/// #31: one identifier of a person.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct Identifier {
+    pub id: String,
+    pub names: Vec<String>,
+    pub count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct Person {
+    pub id: String,
+    pub name: String,
+    pub identifiers: Vec<Identifier>,
+    pub count: usize,
+    pub first_ms: u64,
+    pub last_ms: u64,
+    pub origins: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct Suggestion {
+    pub a: Person,
+    pub b: Person,
+    pub reason: String,
+}
+
+pub async fn list_persons() -> ApiResult<Vec<Person>> {
+    #[derive(Serialize)]
+    struct NoArgs {}
+    if tauri_invoke_fn().is_some() {
+        return invoke("list_persons", &NoArgs {}).await;
+    }
+    http_json(gloo_net::http::Request::get("/api/persons").build()).await
+}
+
+pub async fn person_suggestions() -> ApiResult<Vec<Suggestion>> {
+    #[derive(Serialize)]
+    struct NoArgs {}
+    if tauri_invoke_fn().is_some() {
+        return invoke("person_suggestions", &NoArgs {}).await;
+    }
+    http_json(gloo_net::http::Request::get("/api/persons/suggestions").build()).await
+}
+
+/// The human decides: these identifiers are one person.
+pub async fn merge_identities(ids: Vec<String>, name: String) -> ApiResult<()> {
+    #[derive(Serialize)]
+    struct Args {
+        ids: Vec<String>,
+        name: String,
+    }
+    let args = Args { ids, name };
+    if tauri_invoke_fn().is_some() {
+        return invoke("merge_identities", &args).await;
+    }
+    http_empty(gloo_net::http::Request::post("/api/persons/merge").json(&args)).await
+}
+
+pub async fn split_identity(id: String) -> ApiResult<()> {
+    #[derive(Serialize)]
+    struct Args {
+        id: String,
+    }
+    let args = Args { id };
+    if tauri_invoke_fn().is_some() {
+        return invoke("split_identity", &args).await;
+    }
+    http_empty(gloo_net::http::Request::post("/api/persons/split").json(&args)).await
+}
+
+pub async fn keep_apart(a: String, b: String) -> ApiResult<()> {
+    #[derive(Serialize)]
+    struct Args {
+        a: String,
+        b: String,
+    }
+    let args = Args { a, b };
+    if tauri_invoke_fn().is_some() {
+        return invoke("keep_apart", &args).await;
+    }
+    http_empty(gloo_net::http::Request::post("/api/persons/apart").json(&args)).await
 }
 
 /// #28: types the UI shows as a picture. The same list as the server's inline types.

@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::bytes::{EdgeId, Hash, NodeId, PubKey, RuleId};
 use crate::edge::{Edge, EdgeKind};
 use crate::evidence::{self, Evidence};
+use crate::identity::Decision;
 use crate::ledger::{Decode, LedgerEntry, Op};
 use crate::proposal::Proposal;
 use crate::rule::{self, Rule};
@@ -118,6 +119,8 @@ pub enum ApplyError {
     /// A raw-data batch that breaks the contract (E14): empty, too large, a key twice, a key
     /// that does not fit its item, or an item without id, kind, time or prefixed actors.
     BadEvidence,
+    /// #31: a merge of fewer than two identifiers, or an identifier without scheme.
+    BadIdentity,
 }
 
 impl fmt::Display for ApplyError {
@@ -137,6 +140,9 @@ impl fmt::Display for ApplyError {
             ApplyError::EmptyTitle => f.write_str("Titel darf nicht leer sein"),
             ApplyError::Undecodable(d) => write!(f, "Eintrag nicht lesbar: {d}"),
             ApplyError::BadEvidence => f.write_str("Rohdaten verletzen das Format (E14)"),
+            ApplyError::BadIdentity => f.write_str(
+                "Zusammenführen braucht zwei verschiedene Kennungen mit Schema (z. B. mailto:)",
+            ),
         }
     }
 }
@@ -181,6 +187,11 @@ pub enum Change {
         author: PubKey,
         keys: Vec<Hash>,
         items: Vec<Evidence>,
+    },
+    /// #31: a decision about identifiers. Nothing changes in the graph.
+    Identity {
+        entry: Hash,
+        decision: Decision,
     },
 }
 
@@ -330,6 +341,13 @@ impl Change {
                 view.edge(edge).ok_or(ApplyError::UnknownEdge(*edge))?;
                 Ok(Change::Unlinked(*edge))
             }
+            Op::DecideIdentity { decision } => {
+                decision.check().map_err(|_| ApplyError::BadIdentity)?;
+                Ok(Change::Identity {
+                    entry: e.hash,
+                    decision: decision.clone(),
+                })
+            }
             Op::RecordEvidence { items } => {
                 let keys = e.evidence_keys().map_err(ApplyError::Undecodable)?;
                 check_evidence(&keys, items, e.is_pruned())?;
@@ -478,6 +496,8 @@ pub struct State {
     pub rules: BTreeMap<RuleId, Rule>,
     /// E14: keys of the raw data seen. The items themselves live in the store.
     pub evidence: BTreeSet<Hash>,
+    /// #31: decisions about identifiers, in the order they apply.
+    pub identity: Vec<(Hash, Decision)>,
 }
 
 impl Lookup for State {
@@ -541,6 +561,9 @@ impl State {
             Change::Rejected | Change::Device => {}
             Change::Evidence { keys, .. } => {
                 self.evidence.extend(keys.iter().copied());
+            }
+            Change::Identity { entry, decision } => {
+                self.identity.push((*entry, decision.clone()));
             }
             Change::Sensitivity { node, sensitive } => {
                 self.by_hand.insert(*node, *sensitive);

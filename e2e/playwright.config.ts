@@ -26,21 +26,15 @@ function server(port: number, env: Record<string, string> = {}) {
   };
 }
 
-// #30: a server whose store already holds raw data, loaded with the import tool before it starts.
-function serverWithImports(port: number) {
+// #30, #31: a server whose store already holds raw data, loaded with the import tool before it
+// starts. Each import is `[source, fixture file, extra arguments]`.
+function serverWithImports(port: number, imports: [string, string, string?][]) {
   const base = server(port);
   const data = base.env.SYMBIOT_DATA;
   const fixtures = join(root, "e2e", "fixtures");
-  const imp = (source: string, file: string, extra = "") =>
+  const imp = ([source, file, extra = ""]: [string, string, string?]) =>
     `cargo run --release -q -p symbiot-import -- ${source} "${join(fixtures, file)}" --daten "${data}" ${extra}`;
-  return {
-    ...base,
-    command: [
-      imp("whatsapp", "whatsapp-wandern.txt", "--chat Wandergruppe --utc-offset 60"),
-      imp("mbox", "rechnung.mbox"),
-      base.command,
-    ].join(" && "),
-  };
+  return { ...base, command: [...imports.map(imp), base.command].join(" && ") };
 }
 
 export default defineConfig({
@@ -71,6 +65,11 @@ export default defineConfig({
       use: { baseURL: "http://127.0.0.1:8109" },
     },
     {
+      name: "personen",
+      testMatch: "personen.spec.ts",
+      use: { baseURL: "http://127.0.0.1:8111" },
+    },
+    {
       name: "geraete",
       testMatch: "geraete.spec.ts",
       use: { baseURL: "http://127.0.0.1:8105" },
@@ -90,7 +89,14 @@ export default defineConfig({
       SYMBIOT_AI_MODEL: "mock",
     }),
     server(8105),
-    serverWithImports(8109),
+    serverWithImports(8109, [
+      ["whatsapp", "whatsapp-wandern.txt", "--chat Wandergruppe --utc-offset 60"],
+      ["mbox", "rechnung.mbox"],
+    ]),
+    serverWithImports(8111, [
+      ["whatsapp", "whatsapp-wandern.txt", "--chat Wandergruppe --utc-offset 60"],
+      ["mbox", "anna.mbox"],
+    ]),
     server(8107, {
       SYMBIOT_AI_URL: `http://127.0.0.1:${llmPort}/v1`,
       SYMBIOT_AI_MODEL: "mock",

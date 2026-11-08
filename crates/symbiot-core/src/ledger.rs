@@ -19,6 +19,7 @@ use crate::PROTOCOL_VERSION;
 use crate::bytes::{Blob, EdgeId, Hash, NodeId, PubKey, RuleId, Salt, Sig};
 use crate::edge::EdgeKind;
 use crate::evidence::Evidence;
+use crate::identity::Decision;
 use crate::kind;
 use crate::merkle;
 use crate::node::NodeKind;
@@ -113,6 +114,11 @@ pub enum Op {
     RecordEvidence {
         items: Vec<Evidence>,
     },
+    /// #31: the human decides which identifiers are one person. The identifiers are content
+    /// (personal data, removable); the head only says which kind of decision it was.
+    DecideIdentity {
+        decision: Decision,
+    },
 }
 
 fn enc<T: Serialize + ?Sized>(v: &T) -> Vec<u8> {
@@ -198,6 +204,14 @@ impl Op {
                 None,
             ),
             Op::RemoveSensitivityRule { rule } => (kind::REMOVE_SENSITIVITY_RULE, enc(rule), None),
+            Op::DecideIdentity { decision } => {
+                let tag: u8 = match decision {
+                    Decision::Merge { .. } => 1,
+                    Decision::Split { .. } => 2,
+                    Decision::KeepApart { .. } => 3,
+                };
+                (kind::DECIDE_IDENTITY, enc(&tag), Some(enc(decision)))
+            }
             Op::RecordEvidence { items } => {
                 let keys: Vec<Hash> = items.iter().map(Evidence::key).collect();
                 return (
@@ -410,6 +424,13 @@ impl LedgerEntry {
                 };
                 Op::RecordEvidence { items }
             }
+            // A decision whose content was removed no longer says anything: it is skipped.
+            kind::DECIDE_IDENTITY => match self.content.as_deref() {
+                Some([part]) => Op::DecideIdentity {
+                    decision: dec(&part.data.0)?,
+                },
+                _ => return Err(Decode::Malformed),
+            },
             other => return Err(Decode::Unknown(other)),
         })
     }

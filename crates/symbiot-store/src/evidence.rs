@@ -41,6 +41,8 @@ pub struct EvidenceQuery {
     pub limit: Option<usize>,
     /// Skip this many results (for „load more“).
     pub offset: Option<usize>,
+    /// #31: only items that name one of these identifiers (e.g. all of one person).
+    pub actors: Option<Vec<String>>,
 }
 
 /// How many items one origin has.
@@ -76,6 +78,14 @@ pub(crate) const SCHEMA: &str = "
     CREATE INDEX IF NOT EXISTS evidence_time ON evidence (at_ms);
     CREATE INDEX IF NOT EXISTS evidence_kind ON evidence (kind, at_ms);
     CREATE INDEX IF NOT EXISTS evidence_origin ON evidence (origin, at_ms);
+    CREATE TABLE IF NOT EXISTS evidence_actor (
+        key   BLOB NOT NULL,
+        actor TEXT NOT NULL,
+        role  TEXT NOT NULL,
+        name  TEXT NOT NULL,
+        PRIMARY KEY (key, actor, role)
+    );
+    CREATE INDEX IF NOT EXISTS evidence_actor_id ON evidence_actor (actor);
     CREATE TABLE IF NOT EXISTS evidence_file (
         hash BLOB NOT NULL,
         key  BLOB NOT NULL,
@@ -91,7 +101,7 @@ pub(crate) const SCHEMA: &str = "
     );";
 
 /// Drops the raw-data tables of an older schema; they are rebuilt from the ledger.
-pub(crate) const DROP: &str = "DROP TABLE IF EXISTS evidence; DROP TABLE IF EXISTS evidence_fts; DROP TABLE IF EXISTS evidence_file;";
+pub(crate) const DROP: &str = "DROP TABLE IF EXISTS evidence; DROP TABLE IF EXISTS evidence_fts; DROP TABLE IF EXISTS evidence_file; DROP TABLE IF EXISTS evidence_actor;";
 
 impl Store {
     /// Loads raw data into this device's chain, in batches (E13). Items whose key is already
@@ -134,6 +144,9 @@ impl Store {
                AND (?4 IS NULL OR origin = ?4)
                AND (?5 IS NULL OR rowid IN
                     (SELECT rowid FROM evidence_fts WHERE evidence_fts MATCH ?5))
+               AND (?8 IS NULL OR key IN
+                    (SELECT key FROM evidence_actor
+                     WHERE actor IN (SELECT value FROM json_each(?8))))
              ORDER BY at_ms DESC, key
              LIMIT ?6 OFFSET ?7",
         )?;
@@ -150,7 +163,8 @@ impl Store {
                 q.origin,
                 search,
                 limit,
-                q.offset.unwrap_or(0) as i64
+                q.offset.unwrap_or(0) as i64,
+                q.actors.as_deref().map(json_list)
             ],
             |r| {
                 Ok((
@@ -197,6 +211,28 @@ impl Store {
             |r| Ok((r.get::<_, i64>(0)? as usize, r.get::<_, i64>(1)? as usize)),
         )?)
     }
+}
+
+/// Identifiers (normalised by rule) as a JSON array for `json_each`.
+fn json_list(ids: &[String]) -> String {
+    let mut out = String::from("[");
+    for (i, id) in ids.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push('"');
+        for c in symbiot_core::identity::normalize(id).chars() {
+            match c {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+                c => out.push(c),
+            }
+        }
+        out.push('"');
+    }
+    out.push(']');
+    out
 }
 
 /// The user's words as an FTS5 query: each word quoted (no operators can slip in) and
@@ -270,6 +306,19 @@ pub(crate) fn project_evidence(tx: &Connection, change: &Change) -> Result<()> {
                 "INSERT INTO evidence_fts (rowid, text, meta) VALUES (?1, ?2, ?3)",
                 params![tx.last_insert_rowid(), item.text, meta_of(item)],
             )?;
+            // #31: identifiers by rule, so the same person in another spelling is one.
+            for a in &item.actors {
+                tx.execute(
+                    "INSERT OR IGNORE INTO evidence_actor (key, actor, role, name)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        key.0.as_slice(),
+                        symbiot_core::identity::normalize(&a.id),
+                        a.role,
+                        a.name
+                    ],
+                )?;
+            }
             for f in &item.files {
                 tx.execute(
                     "INSERT OR IGNORE INTO evidence_file (hash, key, name, mime, len)
@@ -302,7 +351,7 @@ pub(crate) fn receive_evidence(tx: &Connection, e: &LedgerEntry) -> Result<()> {
 
 /// Fills the evidence table from the ledger, e.g. after an upgrade.
 pub(crate) fn rebuild_evidence(tx: &Connection) -> Result<()> {
-    tx.execute_batch("DELETE FROM evidence; DELETE FROM evidence_fts; DELETE FROM evidence_file;")?;
+    tx.execute_batch("DELETE FROM evidence; DELETE FROM evidence_fts; DELETE FROM evidence_file; DELETE FROM evidence_actor;")?;
     for chain in all_chains(tx)? {
         for e in &chain {
             receive_evidence(tx, e)?;

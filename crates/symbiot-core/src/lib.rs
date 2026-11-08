@@ -10,6 +10,7 @@ extern crate alloc;
 mod bytes;
 mod edge;
 pub mod evidence;
+pub mod identity;
 pub mod kind;
 mod ledger;
 pub mod merkle;
