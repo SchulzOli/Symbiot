@@ -28,7 +28,7 @@ Hervorgegangen aus dem Ideengarten *TrustInAI*. Benannt nach der *Symbiose Mensc
 | `crates/symbiot-import` | Import-Adapter (E14): Telegram, WhatsApp, mbox, Git. Werkzeug `symbiot-import`, siehe [ROHDATEN.md](docs/ROHDATEN.md#importieren-symbiot-import) |
 | `crates/symbiot-ai` | „Nächsten Schritt vorschlagen“: Kontext, Anfrage an LiteLLM, Prüfung der Quellen. Schreibt nie |
 | `apps/ui` | Leptos-Oberfläche, im Browser über `/api`, in Tauri über `invoke` |
-| `apps/desktop` | Tauri 2: Windows, macOS, Linux (später Android, iOS), Daten lokal |
+| `apps/desktop` | Tauri 2: Windows, macOS, Linux und Android (später iOS), Daten lokal |
 | `apps/server` | axum auf dem Heimserver: API, liefert die UI aus, `/health` |
 | `prototypes/connect` | Prototyp der Idee Connect als 3D-Graph mit Kurzfilm. Eigenständig, Node ohne Abhängigkeiten, nicht im Server-Image. [README](prototypes/connect/README.md) |
 

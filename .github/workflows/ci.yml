@@ -89,3 +89,49 @@ jobs:
         with:
           name: ui-dist
           path: apps/ui/dist
+
+  android:
+    name: Android (APK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown, aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk@0.22.1
+      - name: Cache trunk tools (wasm-bindgen, wasm-opt)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/trunk
+          key: trunk-tools-${{ runner.os }}-0.22.1-${{ hashFiles('Cargo.lock', 'apps/ui/Trunk.toml') }}
+          restore-keys: trunk-tools-${{ runner.os }}-0.22.1-
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # Pull requests get a throwaway key: the APK installs for testing, but cannot update a
+      # release build. Releases are signed with the real key (release.yml).
+      - name: Test key
+        run: |
+          keytool -genkeypair -keystore "$RUNNER_TEMP/test.jks" -storetype PKCS12 -alias test \
+            -keyalg RSA -keysize 2048 -validity 30 -storepass testtest -dname "CN=Symbiot Test"
+      - name: Build APK
+        env:
+          ANDROID_KEYSTORE: ${{ runner.temp }}/test.jks
+          ANDROID_KEYSTORE_PASSWORD: testtest
+          ANDROID_KEY_ALIAS: test
+          # Lints run in the other jobs; here only the build for Android counts.
+          RUSTFLAGS: ""
+        run: apps/desktop/android.sh "$RUNNER_TEMP/symbiot-android-arm64-test.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-test
+          path: ${{ runner.temp }}/symbiot-android-arm64-test.apk

@@ -1,6 +1,6 @@
 name: Release
 
-# Tag vX.Y.Z (matching the workspace version) → desktop installers in a GitHub Release.
+# Tag vX.Y.Z (matching the workspace version) → desktop installers and the Android APK in a GitHub Release.
 on:
   push:
     tags: ["v*"]
@@ -47,5 +47,65 @@ jobs:
           tauriScript: npx --yes @tauri-apps/cli@2
           tagName: ${{ github.ref_name }}
           releaseName: Symbiot ${{ github.ref_name }}
-          releaseBody: Desktop-Installer für Windows, Linux und macOS (unsigniert).
+          releaseBody: Desktop-Installer für Windows, Linux und macOS (unsigniert) und die Android-App (APK, arm64).
           releaseDraft: false
+
+  # M5 (#23): the Android app, signed with the release key from the repository secrets.
+  android:
+    name: Android (APK)
+    needs: desktop
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    env:
+      KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+    steps:
+      - name: Release key present?
+        id: key
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::Kein ANDROID_KEYSTORE_BASE64 – Release ohne APK. Siehe docs/BETRIEB.md (Android)."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.present == 'true'
+      - uses: actions/setup-java@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.key.outputs.present == 'true'
+        with:
+          targets: wasm32-unknown-unknown, aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        if: steps.key.outputs.present == 'true'
+        with:
+          key: android
+      - uses: taiki-e/install-action@v2
+        if: steps.key.outputs.present == 'true'
+        with:
+          tool: trunk@0.22.1
+      - uses: actions/setup-node@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          node-version: 24
+      - name: Build and sign APK
+        if: steps.key.outputs.present == 'true'
+        env:
+          ANDROID_KEYSTORE: ${{ runner.temp }}/release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "$ANDROID_KEYSTORE"
+          apps/desktop/android.sh "$RUNNER_TEMP/Symbiot_${GITHUB_REF_NAME#v}_android_arm64.apk"
+          rm -f "$ANDROID_KEYSTORE"
+      - name: Attach to the release
+        if: steps.key.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --title "Symbiot $GITHUB_REF_NAME" --notes ""
+          gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP"/Symbiot_*_android_arm64.apk --clobber

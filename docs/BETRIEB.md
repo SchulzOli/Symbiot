@@ -57,6 +57,11 @@ Die Geräte gleichen über den Heimserver ab. Auf dem Heimserver selbst ist nich
    neuen Namen. Sonst startet die App leer, und das Gerät braucht einen neuen Schlüssel.
 4. **Verlorenes Gerät:** auf einem anderen Gerät unter „Geräte“ widerrufen (braucht die Wörter).
 
+**Android (M5):** Das APK aus dem Release installieren (Android fragt einmal nach der Erlaubnis für Apps aus
+dieser Quelle). Einrichten wie am Desktop: „Geräte“ → vorhandenen Schlüssel eingeben, Adresse des Heimservers
+eintragen. Das Handy muss den Heimserver erreichen, also im Tailnet sein (Tailscale-App). Die Daten liegen im
+privaten App-Speicher; deinstallieren löscht sie.
+
 Im Log stehen nur Metadaten (Gerät, Anzahl Einträge), nie Wörter oder Inhalte. Eine Verzweigung (ein
 Geräteschlüssel schreibt zwei Geschichten) wird mit Level `ERROR` geloggt.
 
@@ -76,6 +81,14 @@ Geräteschlüssel schreibt zwei Geschichten) wird mit Level `ERROR` geloggt.
    Alternative: in Komodo eine Registry-Anmeldung für ghcr.io hinterlegen.
 3. **Dozzle-Alarm:** Container `symbiot`, Bedingung Level `error` → Alarm-Raum in Matrix.
 4. **Beszel-Alarm:** Container `symbiot` *unhealthy/stopped* → Alarm-Raum in Matrix.
+5. **Android-Signaturschlüssel:** Einmal erzeugen und gut sichern (Passwort-Manager). Mit einem neuen Schlüssel
+   kann ein installiertes APK nicht mehr aktualisiert werden, nur neu installiert (Daten weg).
+   ```bash
+   keytool -genkeypair -keystore symbiot-release.jks -storetype PKCS12 -alias symbiot -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=Symbiot"
+   ```
+   Dann unter *GitHub → Settings → Secrets and variables → Actions* drei Secrets anlegen:
+   `ANDROID_KEYSTORE_BASE64` (Ausgabe von `base64 -w0 symbiot-release.jks`), `ANDROID_KEYSTORE_PASSWORD` (das
+   Passwort von oben) und `ANDROID_KEY_ALIAS` (`symbiot`). Ohne diese Secrets erscheint der Release ohne APK.
 
 ## Prüfen
 
@@ -94,4 +107,7 @@ git tag v0.3.0
 ```bash
 git push origin v0.3.0
 ```
-Die Version im Tag muss zur Version in `Cargo.toml` passen (`[workspace.package] version`).
+Die Version im Tag muss zur Version in `Cargo.toml` passen (`[workspace.package] version`). Der Release enthält
+die Desktop-Installer und, sobald die Secrets aus Schritt 5 angelegt sind, das signierte Android-APK (arm64).
+Jeder Pull Request baut ein Test-APK (Artefakt `android-apk-test`) mit einem Wegwerf-Schlüssel: zum Ausprobieren,
+nicht als Update für die Release-App.
