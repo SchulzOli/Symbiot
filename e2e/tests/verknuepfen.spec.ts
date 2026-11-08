@@ -5,7 +5,7 @@ import { expect, test } from "@playwright/test";
 test("erfassen, verbinden, bearbeiten, Graph, Kette prüfen, löschen", async ({ page }) => {
   await page.goto("/");
   const capture = page.locator("form.capture");
-  const cards = page.getByTestId("node-card");
+  const cards = page.getByTestId("canvas-node");
 
   async function festhalten(kind: string, title: string) {
     await capture.locator("select").selectOption(kind);
@@ -37,9 +37,9 @@ test("erfassen, verbinden, bearbeiten, Graph, Kette prüfen, löschen", async ({
   await expect(detail.locator(".history li").last()).toContainText("„5,2 km gelaufen“");
 
   // Graph: two nodes, one "supports" arrow.
-  await page.getByRole("button", { name: "Graph" }).click();
-  await expect(page.getByTestId("graph-node")).toHaveCount(2);
-  const edge = page.getByTestId("graph-edge");
+  // E15: the canvas shows the connection as an arrow between the two cards.
+  await expect(cards).toHaveCount(2);
+  const edge = page.getByTestId("canvas-edge");
   await expect(edge).toHaveCount(1);
   await expect(edge).toHaveAttribute("data-kind", "supports");
 
@@ -48,14 +48,16 @@ test("erfassen, verbinden, bearbeiten, Graph, Kette prüfen, löschen", async ({
   await expect(page.getByText(/✓ Kette ok · 4 Einträge/)).toBeVisible();
 
   // Unlink, then delete the evidence: both versions lose their content, the chain stays valid.
+  // The list shows the same nodes; Enter opens one like a click.
   await page.getByRole("button", { name: "Liste" }).click();
-  await cards.filter({ hasText: "5,2 km gelaufen" }).click();
+  await page.getByTestId("node-card").filter({ hasText: "5,2 km gelaufen" }).focus();
+  await page.keyboard.press("Enter");
   await detail.getByRole("button", { name: "Verbindung lösen" }).click();
   await expect(detail.getByText("→ stützt „Laufen“")).toHaveCount(0);
   await detail.getByRole("button", { name: "Löschen" }).click();
   await expect(page.getByTestId("confirm-delete")).toContainText("Titel und Text aller Versionen");
   await page.getByRole("button", { name: "Endgültig löschen" }).click();
-  await expect(cards).toHaveCount(1);
+  await expect(page.getByTestId("node-card")).toHaveCount(1);
   await expect(page.getByTestId("detail")).toHaveCount(0);
 
   // + 1 unlink + 1 deletion marker = 6 entries, 2 of them without content.

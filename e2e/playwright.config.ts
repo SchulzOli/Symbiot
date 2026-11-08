@@ -70,6 +70,11 @@ export default defineConfig({
       use: { baseURL: "http://127.0.0.1:8111" },
     },
     {
+      name: "canvas",
+      testMatch: "canvas.spec.ts",
+      use: { baseURL: "http://127.0.0.1:8113" },
+    },
+    {
       name: "geraete",
       testMatch: "geraete.spec.ts",
       use: { baseURL: "http://127.0.0.1:8105" },
@@ -89,6 +94,7 @@ export default defineConfig({
       SYMBIOT_AI_MODEL: "mock",
     }),
     server(8105),
+    server(8113),
     serverWithImports(8109, [
       ["whatsapp", "whatsapp-wandern.txt", "--chat Wandergruppe --utc-offset 60"],
       ["mbox", "rechnung.mbox"],

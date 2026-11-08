@@ -5,6 +5,8 @@
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+
+use crate::icons::{Icon, Svg};
 use symbiot_core::evidence::role;
 use symbiot_core::{Evidence, FileRef};
 use wasm_bindgen::JsValue;
@@ -90,7 +92,7 @@ pub fn Timeline(refresh: RwSignal<u32>, person: PersonFilter) -> impl IntoView {
             {move || person.get().map(|(_, name)| view! {
                 <div class="row">
                     <span class="chip active" data-testid="person-filter">{format!("Person: {name}")}</span>
-                    <button class="link" on:click=move |_| person.set(None)>"alle zeigen"</button>
+                    <button class="icon-btn small" aria-label="alle zeigen" data-tip="Filter aufheben, alle zeigen" on:click=move |_| person.set(None)><Svg icon=Icon::Close /></button>
                 </div>
             })}
             <form class="row" on:submit=search>
@@ -101,7 +103,7 @@ pub fn Timeline(refresh: RwSignal<u32>, person: PersonFilter) -> impl IntoView {
                     prop:value=move || input.get()
                     on:input=move |ev| input.set(event_target_value(&ev))
                 />
-                <button type="submit">"Suchen"</button>
+                <button type="submit" class="icon-btn primary" aria-label="Suchen" data-tip="Suchen (Enter)"><Svg icon=Icon::Search /></button>
             </form>
             {move || origins.get().and_then(|r| r.ok()).filter(|o| !o.is_empty()).map(|all| {
                 let total: usize = all.iter().map(|o| o.count).sum();
@@ -140,8 +142,9 @@ pub fn Timeline(refresh: RwSignal<u32>, person: PersonFilter) -> impl IntoView {
                 view! { <div class="evidence-list">{rows}</div> }.into_any()
             }}
             {move || has_more.get().then(|| view! {
-                <button class="chip" disabled=move || loading.get() on:click=move |_| load(items.with_untracked(Vec::len))>
-                    "Mehr laden"
+                <button class="icon-btn more-btn" aria-label="Mehr laden" data-tip="Ältere laden" disabled=move || loading.get()
+                    on:click=move |_| load(items.with_untracked(Vec::len))>
+                    <Svg icon=Icon::More />
                 </button>
             })}
         </section>
@@ -215,8 +218,9 @@ fn FileView(file: FileRef) -> impl IntoView {
         .into_any();
     }
     match url {
-        Some(u) => view! { <a class="file" href=u>{format!("📎 {label}")}</a> }.into_any(),
-        None => view! { <span class="muted file">{format!("📎 {label}")}</span> }.into_any(),
+        Some(u) => view! { <a class="file" href=u><Svg icon=Icon::Download />{label.clone()}</a> }
+            .into_any(),
+        None => view! { <span class="muted file">{label.clone()}</span> }.into_any(),
     }
 }
 

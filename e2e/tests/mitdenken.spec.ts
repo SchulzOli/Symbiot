@@ -4,7 +4,7 @@ import { expect, test } from "@playwright/test";
 test("KI schlägt vor, du entscheidest", async ({ page }) => {
   await page.goto("/");
   const capture = page.locator("form.capture");
-  const cards = page.getByTestId("node-card");
+  const cards = page.getByTestId("canvas-node");
   const verify = async (entries: number) => {
     await page.getByRole("button", { name: "Kette prüfen" }).click();
     await expect(page.getByText(new RegExp(`✓ Kette ok · ${entries} Einträge`))).toBeVisible();
@@ -47,6 +47,6 @@ test("KI schlägt vor, du entscheidest", async ({ page }) => {
 
   // Marking by hand: one click, recorded in the chain, shown on the card.
   await detail.getByLabel("🔒 Sensibel – verlässt nie das Heimnetz").check();
-  await expect(cards.filter({ hasText: "Laufschuhe kaufen" }).locator(".lock")).toBeVisible();
+  await expect(cards.filter({ hasText: "Laufschuhe kaufen" }).locator(".lock-mark")).toBeVisible();
   await verify(5);
 });

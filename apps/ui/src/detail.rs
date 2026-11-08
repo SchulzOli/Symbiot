@@ -5,6 +5,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use symbiot_core::{Edge, EdgeKind, Node, NodeId, NodeKind, Op, Policy, Proposal};
 
+use crate::icons::{Icon, Svg};
 use crate::{api, format_ms, short};
 
 #[component]
@@ -50,7 +51,7 @@ pub fn Detail(
             view! {
                 <li>
                     <button class="link" on:click=move |_| selected.set(Some(other))>{text}</button>
-                    <button class="unlink" title="Verbindung lösen" aria-label="Verbindung lösen" on:click=unlink>"✕"</button>
+                    <button class="icon-btn small" aria-label="Verbindung lösen" data-tip="Verbindung lösen" on:click=unlink><Svg icon=Icon::Unlink /></button>
                 </li>
             }
         })
@@ -70,19 +71,14 @@ pub fn Detail(
         }
     });
 
-    // Bring the panel into view when a node far down the list is opened.
-    let panel = NodeRef::<leptos::html::Aside>::new();
-    Effect::new(move |_| {
-        if let Some(el) = panel.get() {
-            el.scroll_into_view();
-        }
-    });
-
     view! {
-        <aside class="detail" data-testid="detail" node_ref=panel>
-            <div class="row between">
+        <aside class="sheet detail" data-testid="detail" role="complementary"
+            aria-label=format!("Details: {}", node.title)>
+            <div class="sheet-head">
                 <span class=format!("kind kind-{}", node.kind.as_str())>{node.kind.label()}</span>
-                <button class="chip" on:click=move |_| selected.set(None)>"Schließen"</button>
+                <button class="icon-btn" aria-label="Schließen" data-tip="Schließen (Esc)" on:click=move |_| selected.set(None)>
+                    <Svg icon=Icon::Close />
+                </button>
             </div>
             {node.concurrent.then(|| view! { <Concurrent node=node.clone() on_saved /> })}
             <Edit node=node.clone() on_saved />
@@ -121,7 +117,7 @@ fn Concurrent(node: Node, on_saved: impl Fn() + Copy + Send + Sync + 'static) ->
             </p>
             <div class="row end">
                 {move || error.get().map(|e| view! { <span class="error">{e}</span> })}
-                <button class="chip" on:click=keep>"Passt so"</button>
+                <button class="icon-btn" aria-label="Passt so" data-tip="Passt so" on:click=keep><Svg icon=Icon::Check /></button>
             </div>
         </div>
     }
@@ -152,7 +148,9 @@ fn Edit(node: Node, on_saved: impl Fn() + Copy + Send + Sync + 'static) -> impl 
             <textarea rows="3" bind:value=body aria-label="Details"></textarea>
             <div class="row end">
                 {move || error.get().map(|e| view! { <span class="error">{e}</span> })}
-                <button type="submit">"Neue Version speichern"</button>
+                <button type="submit" class="icon-btn primary" aria-label="Neue Version speichern" data-tip="Neue Version speichern">
+                    <Svg icon=Icon::Save />
+                </button>
             </div>
         </form>
     }
@@ -293,10 +291,12 @@ fn Delete(
     };
     view! {
         <div class="row end">
-            <button class="chip danger" on:click=move |_| asking.set(true)>"Löschen"</button>
+            <button class="icon-btn danger" aria-label="Löschen" data-tip="Löschen" on:click=move |_| asking.set(true)>
+                <Svg icon=Icon::Trash />
+            </button>
         </div>
         {move || asking.get().then(|| view! {
-            <div class="confirm" data-testid="confirm-delete">
+            <div class="confirm" data-testid="confirm-delete" role="alertdialog" aria-label="Wirklich löschen?">
                 <p>{consequence}</p>
                 <div class="row end">
                     {move || error.get().map(|e| view! { <span class="error">{e}</span> })}
@@ -380,8 +380,8 @@ fn NextStep(
                     <ul class="sources">{sources}</ul>
                     <small class="muted">{format!("Modell {} · noch nicht gespeichert", p.model)}</small>
                     <div class="row end">
-                        <button class="chip" on:click=move |_| decide(false)>"Ablehnen"</button>
-                        <button on:click=move |_| decide(true)>"Annehmen"</button>
+                        <button class="icon-btn" aria-label="Ablehnen" data-tip="Ablehnen" on:click=move |_| decide(false)><Svg icon=Icon::Close /></button>
+                        <button class="icon-btn primary" aria-label="Annehmen" data-tip="Annehmen" on:click=move |_| decide(true)><Svg icon=Icon::Check /></button>
                     </div>
                 </div>
             }
@@ -402,9 +402,11 @@ fn NextStep(
                 view! {
                     <div class="next-step">
                         {external}
-                        <button on:click=ask disabled=move || busy.get()>
-                            {move || if busy.get() { "Denke nach …" } else { "Nächsten Schritt vorschlagen" }}
+                        <button class="icon-btn primary" aria-label="Nächsten Schritt vorschlagen"
+                            data-tip="Nächsten Schritt vorschlagen" on:click=ask disabled=move || busy.get()>
+                            <Svg icon=Icon::Sparkles />
                         </button>
+                        {move || busy.get().then(|| view! { <span class="muted" role="status">"Denke nach …"</span> })}
                     </div>
                 }.into_any()
             }
@@ -464,7 +466,7 @@ fn Connect(
                     .map(|(id, label)| view! { <option value=id.to_hex()>{label}</option> })
                     .collect_view()}
             </select>
-            <button type="submit">"Verbinden"</button>
+            <button type="submit" class="icon-btn primary" aria-label="Verbinden" data-tip="Verbinden"><Svg icon=Icon::Link /></button>
             {move || error.get().map(|e| view! { <span class="error">{e}</span> })}
         </form>
     }

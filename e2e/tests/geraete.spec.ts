@@ -3,6 +3,8 @@ import { expect, test } from "@playwright/test";
 // M4 / E5 in the web UI on the home server: set up a new person key, check three words, confirm this device.
 test("Personen-Schlüssel anlegen und Gerät bestätigen", async ({ page }) => {
   await page.goto("/");
+  // E15: a note leads to the setup; the panel opens from it (or from the toolbar).
+  await page.getByTestId("setup-banner").getByRole("button", { name: "Einrichten" }).click();
   const devices = page.getByTestId("devices");
   await expect(devices.getByTestId("setup")).toBeVisible();
 

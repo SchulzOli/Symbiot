@@ -4,6 +4,8 @@
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
+use crate::icons::{Icon, Svg};
+
 use crate::api::{self, Person, Suggestion};
 use crate::timeline::PersonFilter;
 
@@ -75,8 +77,8 @@ pub fn Persons(
                                     <span class="muted">{format!(" · {}", s.reason)}</span>
                                 </p>
                                 <div class="row">
-                                    <button on:click=move |_| merge(m.clone())>"Zusammenführen"</button>
-                                    <button class="chip" on:click=move |_| apart(a.clone())>"Nicht dieselbe"</button>
+                                    <button class="icon-btn primary" aria-label="Zusammenführen" data-tip="Zusammenführen" on:click=move |_| merge(m.clone())><Svg icon=Icon::Merge /></button>
+                                    <button class="icon-btn" aria-label="Nicht dieselbe" data-tip="Nicht dieselbe Person" on:click=move |_| apart(a.clone())><Svg icon=Icon::Apart /></button>
                                 </div>
                             </div>
                         }
@@ -120,14 +122,14 @@ fn PersonCard(
                         <span class="identifier" title=i.names.join(", ")>
                             {i.id.clone()}
                             {several.then(|| view! {
-                                <button class="link" title="Als eigene Person trennen" aria-label=format!("{} trennen", i.id)
-                                    on:click=move |_| split(id.clone())>"×"</button>
+                                <button class="icon-btn tiny" data-tip="Als eigene Person trennen" aria-label=format!("{} trennen", i.id)
+                                    on:click=move |_| split(id.clone())><Svg icon=Icon::Split /></button>
                             })}
                         </span>
                     }
                 }).collect_view()}
             </div>
-            <button class="link" on:click=move |_| show.set(Some((id.clone(), name.clone())))>"Zeitleiste zeigen"</button>
+            <button class="icon-btn" aria-label="Zeitleiste zeigen" data-tip="Zeitleiste dieser Person" on:click=move |_| show.set(Some((id.clone(), name.clone())))><Svg icon=Icon::Timeline /></button>
         </article>
     }
 }

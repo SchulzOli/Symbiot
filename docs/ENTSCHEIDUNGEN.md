@@ -351,6 +351,71 @@ Drei Wege, vom einfachsten zum vollständigsten:
 - **DuckDB und Verschlüsselung:** Passt die Verschlüsselung von DuckDB bzw. Parquet zu E6 auf allen Plattformen,
   auch Android?
 
+## E15 — Oberfläche: Canvas, Symbole, barrierefrei · *entschieden (2026-11-08)*
+
+Gewünscht vom Besitzer: benutzerfreundlich, modern, leicht zu bedienen, barrierefrei, Symbole statt Text-Knöpfen
+(mit Tooltips), ein Canvas von der ersten Minute an.
+
+- **Canvas als Startansicht.** Knoten sind Karten auf einer Fläche, Verbindungen Pfeile. Verschieben, zoomen,
+  „alles zeigen“; Karten lassen sich ziehen und über das Verbinden-Symbol (oder die Taste L) verbinden. Die
+  Lage der Karten ist Ansichtssache dieses Geräts und bleibt im Browser (`localStorage`), nicht in der Kette.
+- **Gebaut aus echten Elementen, nicht als Bild.** Ein `<canvas>`-Bitmap wäre für Screenreader und Tastatur
+  unsichtbar. Jede Karte ist ein Knopf in einer Liste mit sprechendem Namen („Ziel: Laufen, 2 Verbindungen“).
+  Daneben bleibt die **Liste** als ruhigste Form derselben Knoten.
+- **Symbole statt Text-Knöpfen.** Jedes Symbol trägt seine Worte als `aria-label` (Screenreader, Sprachsteuerung,
+  Tests) und als Tooltip, der auch bei Tastatur-Fokus erscheint, nicht nur bei Mausberührung. Text bleibt, wo
+  ein Symbol nicht eindeutig ist oder etwas Unumkehrbares bestätigt wird („Endgültig löschen“, Einrichtung).
+- **Barrierefreiheit nach WCAG 2.2 AA:** Sprunglink, Landmarken (Kopf, Ansichten, Inhalt, Seitenleisten),
+  sichtbarer Fokus, Ziele von 40 px, Kontrast ≥ 4,5:1 (Art-Farben dafür angepasst), Ergebnisse als Live-Region,
+  Tastenkürzel (1–4 Ansichten, N Festhalten, Esc schließt; im Canvas Pfeile, + / −, 0, Umschalt + Pfeile, L),
+  reduzierte Bewegung, Hochkontrast-Modus. **Automatisch geprüft** mit axe-core in jedem E2E-Lauf.
+- **Aufbau:** Kopfleiste mit Werkzeugen (Kette prüfen, Regeln, Geräte, Feedback), Leiste mit den Ansichten
+  (Canvas, Liste, Zeitleiste, Personen; auf dem Handy unten), Seitenleisten für Detail, Regeln und Geräte (auf dem
+  Handy von unten).
+
+Später: Personen und Rohdaten als Karten auf dem Canvas, Gruppen und Rahmen, Minikarte.
+
+## E16 — Was der Mensch kann, kann die KI vorschlagen · *entschieden (2026-11-08), Umsetzung als Vorschlag*
+
+Gewünscht vom Besitzer: Alles, was der Mensch tun kann, soll die KI mit Bestätigung des Menschen genauso tun
+können. Das verschärft die Grundregel nicht, es macht sie vollständig: Die KI schlägt vor, der Mensch entscheidet,
+und zwar für **jede** Handlung, nicht nur für „nächster Schritt“ und „Regeln“.
+
+**Vorschlag zur Umsetzung:**
+- **Eine Aktionsschicht für beide.** Jede Handlung der Oberfläche wird eine benannte, typisierte Aktion
+  (`create_node`, `link`, `merge_identities`, `set_sensitive`, `import`, …) mit beschriebenen Parametern. Die
+  Oberfläche ruft genau diese Aktionen auf. So gibt es keine Handlung, die nur der Mensch kennt.
+- **Die KI erzeugt Vorschläge, keine Aktionen.** Ein Vorschlag ist eine Liste von Aktionen mit Begründung und
+  Quellen. Er erscheint im Canvas als Karte „Vorschlag“ mit Vorschau dessen, was sich ändert, und mit
+  ✓ (alle annehmen), ✗ (ablehnen) und Einzelauswahl.
+- **Erst der Klick führt aus.** Die Aktionen laufen dann wie vom Menschen ausgelöst; Annehmen und Ablehnen
+  stehen als Entscheidung in der Kette (wie heute bei `AcceptProposal`), mit Modell und Quellen.
+- **Derselbe Weg für fremde Agenten:** Der MCP-Server (#25) bietet dieselben Aktionen als Werkzeuge an, die nur
+  Vorschläge anlegen.
+- **Grenzen bleiben:** Sensible Inhalte gehen nur an das lokale Modell (E4), Texte von außen sind Daten und nie
+  Auftrag (E12), Handlungen nach außen brauchen immer den Klick (E10).
+
+## E17 — Langflow für die Pipelines? · *Vorschlag (2026-11-08): nein*
+
+Geprüft auf Wunsch des Besitzers, ob Langflow (visueller Baukasten für LLM-Abläufe) die Pipelines aus E14 bauen
+soll. Empfehlung: **nicht einbauen.**
+
+- **Passt nicht zu E1.** Langflow ist ein Python-Server. Symbiot läuft auf Handy, Desktop, Server und
+  Mikrocontroller aus einem Rust-Kern; eine Pipeline muss überall laufen können.
+- **Führt Code aus, by design.** Komponenten sind beliebiger Python-Code. Das ist das Gegenteil der
+  Sandbox-Adapter aus E7 (WebAssembly mit erklärten Rechten).
+- **Sicherheitslage 2026.** Mehrere kritische Lücken ohne Anmeldung (CVSS 9,8), aktiv ausgenutzt zum Stehlen
+  von Cloud- und KI-Schlüsseln, ein „gefixter“ Stand blieb ausnutzbar, für 1.12.x gab es Anfang November keinen
+  Patch (IBM-Bulletins, Cloud Security Alliance, JFrog). Für ein System mit dem ganzen Leben eines Menschen ist
+  das kein tragbares Risiko.
+- **Falsche Richtung.** Langflow-Abläufe führen aus. Symbiot will, dass die KI vorschlägt und der Mensch
+  entscheidet (E16).
+
+**Stattdessen:** Pipelines (Adapter → Aufbereiter) als Daten beschreiben und **auf dem eigenen Canvas** anzeigen
+und bearbeiten: Quellen und Aufbereiter als Karten, Verbindungen als Datenfluss, Zustand und letzte Läufe an
+der Karte. Wer Langflow trotzdem nutzt, kann es später als externe Quelle über MCP anbinden, ohne Zugriff auf die
+Ketten.
+
 ## E8 — Zurückgestellt · *entschieden*
 
 - **Neue Knotenarten** wie „Absicht“ oder „Gegenseite“: erst einmal nicht. Für abgeleitete Dinge sind seit E14

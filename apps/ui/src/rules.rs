@@ -2,6 +2,8 @@
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+
+use crate::icons::{Icon, Svg};
 use symbiot_core::{Node, Rule};
 
 use crate::api::{self, RuleProposal};
@@ -68,8 +70,8 @@ pub fn Rules(
                 </p>
                 <small class="muted">{format!("Modell {} · noch nicht gespeichert", p.model)}</small>
                 <div class="row end">
-                    <button class="chip" on:click=move |_| decline(d.clone())>"Ablehnen"</button>
-                    <button on:click=move |_| accept(a.clone())>"Annehmen"</button>
+                    <button class="icon-btn" aria-label="Ablehnen" data-tip="Ablehnen" on:click=move |_| decline(d.clone())><Svg icon=Icon::Close /></button>
+                    <button class="icon-btn primary" aria-label="Annehmen" data-tip="Annehmen" on:click=move |_| accept(a.clone())><Svg icon=Icon::Check /></button>
                 </div>
             </div>
         }
@@ -96,9 +98,11 @@ pub fn Rules(
             {move || match info.get() {
                 Some(Ok(i)) if i.available => view! {
                     <div class="row">
-                        <button class="chip" on:click=ask disabled=move || busy.get()>
-                            {move || if busy.get() { "Denke nach …" } else { "KI nach Regeln fragen" }}
+                        <button class="icon-btn primary" aria-label="KI nach Regeln fragen" data-tip="KI nach Regeln fragen"
+                            on:click=ask disabled=move || busy.get()>
+                            <Svg icon=Icon::Sparkles />
                         </button>
+                        {move || busy.get().then(|| view! { <span class="muted" role="status">"Denke nach …"</span> })}
                         <span class="muted">{format!("nur mit dem lokalen Modell ({})", i.local_model.unwrap_or_default())}</span>
                     </div>
                 }
@@ -136,7 +140,7 @@ fn RuleRow(rule: Rule, on_saved: impl Fn() + Copy + Send + Sync + 'static) -> im
         <li>
             <strong>{rule.label.clone()}</strong>
             {format!(": {}{origin}", rule.keywords.join(", "))}
-            <button class="unlink" title="Regel entfernen" aria-label="Regel entfernen" on:click=remove>"✕"</button>
+            <button class="icon-btn small" aria-label="Regel entfernen" data-tip="Regel entfernen" on:click=remove><Svg icon=Icon::Trash /></button>
             {move || error.get().map(|e| view! { <span class="error">{e}</span> })}
         </li>
     }
@@ -171,7 +175,7 @@ fn OwnRule(on_saved: impl Fn() + Copy + Send + Sync + 'static) -> impl IntoView 
         <form class="own-rule row" on:submit=save>
             <input type="text" placeholder="Eigene Regel, z. B. Finanzen" bind:value=label aria-label="Name der Regel" required />
             <input type="text" placeholder="Stichwörter, mit Komma: konto, steuer" bind:value=keywords aria-label="Stichwörter" required />
-            <button type="submit" class="chip">"Regel hinzufügen"</button>
+            <button type="submit" class="icon-btn primary" aria-label="Regel hinzufügen" data-tip="Regel hinzufügen"><Svg icon=Icon::Plus /></button>
             {move || error.get().map(|e| view! { <span class="error">{e}</span> })}
         </form>
     }
