@@ -15,8 +15,8 @@ Hervorgegangen aus dem Ideengarten *TrustInAI*. Benannt nach der *Symbiose Mensc
 - [docs/TECH-STACK.md](docs/TECH-STACK.md): Stack, Architektur, Entwicklungsumgebung
 - [docs/PLAN.md](docs/PLAN.md): Meilensteine M0–M6, Lifecycle, Checkpoints
 - [docs/FEATURES.md](docs/FEATURES.md): erste Features F1–F7 mit Abnahmekriterien
-- [docs/BETRIEB.md](docs/BETRIEB.md): Weg eines Commits bis heimserver, Release, Einrichtung, Prüfen
-- [docs/ENTSCHEIDUNGEN.md](docs/ENTSCHEIDUNGEN.md): Entscheidungen E1–E13 (Löschen, Schlüssel, Verschlüsselung, Adapter, Bündeln, Symbiot + Connect)
+- [docs/BETRIEB.md](docs/BETRIEB.md): Weg eines Commits bis zum Heimserver, Release, Einrichtung, Prüfen
+- [docs/ENTSCHEIDUNGEN.md](docs/ENTSCHEIDUNGEN.md): Entscheidungen E1–E14 (Löschen, Schlüssel, Verschlüsselung, Adapter, Bündeln, Symbiot + Connect, Lebensgraph)
 
 ## Aufbau
 | Teil | Rolle |
@@ -27,11 +27,11 @@ Hervorgegangen aus dem Ideengarten *TrustInAI*. Benannt nach der *Symbiose Mensc
 | `crates/symbiot-ai` | „Nächsten Schritt vorschlagen“: Kontext, Anfrage an LiteLLM, Prüfung der Quellen. Schreibt nie |
 | `apps/ui` | Leptos-Oberfläche, im Browser über `/api`, in Tauri über `invoke` |
 | `apps/desktop` | Tauri 2: Windows, macOS, Linux (später Android, iOS), Daten lokal |
-| `apps/server` | axum auf heimserver: API, liefert die UI aus, `/health` |
+| `apps/server` | axum auf dem Heimserver: API, liefert die UI aus, `/health` |
 | `prototypes/connect` | Prototyp der Idee Connect als 3D-Graph mit Kurzfilm. Eigenständig, Node ohne Abhängigkeiten, nicht im Server-Image. [README](prototypes/connect/README.md) |
 
 ## Entwickeln
-Voraussetzungen und Einrichtung: [docs/TECH-STACK.md](docs/TECH-STACK.md#entwicklungsumgebung-windows-pc).
+Voraussetzungen und Einrichtung: [docs/TECH-STACK.md](docs/TECH-STACK.md#entwicklungsumgebung-windows).
 
 ```bash
 cargo test --workspace
@@ -52,12 +52,12 @@ cd apps/desktop && cargo tauri dev
 
 ## Status
 - **M0 Fundament:** fertig
-- **M1 Walking Skeleton:** fertig (v0.1.0, läuft auf heimserver; Alarme bewusst weggelassen)
+- **M1 Walking Skeleton:** fertig (v0.1.0, läuft auf dem Heimserver; Alarme bewusst weggelassen)
 - **M2 Verknüpfen:** fertig (v0.2.0): Kanten, Graph, Bearbeiten mit Verlauf, E2E-Test
 - **M3 Mitdenken:** fertig (v0.2.0): KI-Vorschlag mit Quellen, Annehmen/Ablehnen im Ledger, sensible Knoten, Feedback-Link. Offen: Woche Dogfooding (Checkpoint)
 - **Vor M4:** fertig (v0.2.0): Kettenformat v2 (Protokoll 2) mit Löschen, „löschbar“ und „exportierbar“ pro Knoten (E2, E3, E13)
 - **E4 Sensibel:** Regeln für Sensibles, von der KI vorgeschlagen, von dir angenommen
-- **M4 Synchron:** fertig (v0.3.0): Personen-Schlüssel (E5), Abgleich über heimserver, neueste Version gewinnt mit Hinweis, Widerruf. Einrichtung: [BETRIEB.md](docs/BETRIEB.md#abgleich-m4)
+- **M4 Synchron:** fertig (v0.3.0): Personen-Schlüssel (E5), Abgleich über den Heimserver, neueste Version gewinnt mit Hinweis, Widerruf. Einrichtung: [BETRIEB.md](docs/BETRIEB.md#abgleich-m4)
 
 End-to-End-Test lokal (braucht `trunk build --release` in `apps/ui`):
 ```bash

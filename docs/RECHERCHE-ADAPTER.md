@@ -85,7 +85,7 @@ Legende Reife: ●●● produktiv und stabil · ●●○ nutzbar, ändert sich
 | Option | Reife | Rust | Passung |
 |---|---|---|---|
 | **W3C Verifiable Credentials 2.0** (Rec. 15.05.2025, *Datum aus Sekundärquelle*) + Data Integrity `eddsa-jcs-2022` | ●●● | `ssi` (SpruceID) u. a. | Ed25519 ist schon da. Als **Exportformat** für Belege und Einwilligungen nach außen geeignet, intern zu schwer |
-| **IETF SCITT** (RFC 9943, Architektur, 2026) | ●●○ | wenig, COSE/CBOR | Modell „Signed Statement → Transparenzdienst → Receipt“ passt genau zu heimserver als Kopie und Zeuge |
+| **IETF SCITT** (RFC 9943, Architektur, 2026) | ●●○ | wenig, COSE/CBOR | Modell „Signed Statement → Transparenzdienst → Receipt“ passt genau zum Heimserver als Kopie und Zeuge |
 | **C2PA / Content Credentials** | ●●● (Medien) | `c2pa` (offizielles Rust-SDK) | nur für Bilder und Dokumente mit eingebetteter Herkunft. Prüfen beim Import, nicht als eigenes Format |
 | **Data Transfer Project / DTI** | ●●○ | – (Java) | Exporte großer Dienste (Fotos, Playlists). Trust Registry seit 2026 nach Pilot. Eher Importquelle als Standard |
 | **schema.org, ActivityStreams, JSCalendar/JSContact** | ●●● | Serde-Typen selbst schreiben | als **Typ-Vokabular** für Knoten: `schema:Event`, `as:Note`, `jscalendar:Event` |
@@ -102,7 +102,7 @@ Legende Reife: ●●● produktiv und stabil · ●●○ nutzbar, ändert sich
 ```
  Quelle (CalDAV, HA, Matrix …)
         │  nur erlaubte Hosts
- ┌──────▼──────────────────────┐      Host (Desktop, heimserver oder gehostet)
+ ┌──────▼──────────────────────┐      Host (Desktop, Heimserver, gehostet)
  │ Adapter = WASM-Komponente   │ emit(record) ──► Host prüft gegen Manifest,
  │ exportiert: describe, sync, │                   signiert mit dem ADAPTER-Schlüssel,
  │   (act)                     │                   hängt an die Kette des Adapters an
@@ -133,7 +133,7 @@ Legende Reife: ●●● produktiv und stabil · ●●○ nutzbar, ändert sich
    Handlungen nach außen (Nachricht senden, Licht schalten) sind ebenfalls Vorschläge. Nach dem Klick führt der
    Adapter sie über ein eigenes Export `act(proposal_id)` aus, und nur mit der Capability `act:*`. Der Grant
    ist eine einmalige Erlaubnis zum *Beobachten*. Er erlaubt keine Automatik.
-5. **Der Ort ist Konfiguration.** Dieselbe Komponente läuft auf dem Desktop, auf heimserver oder gehostet. Der Grant
+5. **Der Ort ist Konfiguration.** Dieselbe Komponente läuft auf dem Desktop, auf dem Heimserver oder gehostet. Der Grant
    nennt den Ort. Der Mensch sieht pro Adapter: wo er läuft, welche Hosts er erreicht, wie viele Belege er
    geschrieben hat.
 
@@ -181,7 +181,7 @@ world adapter {
   `wasip3` für Rust-Gäste stabil sind. `wasmtime` kann 0.2- und 0.3-Komponenten im selben Binary ausführen.
 - **Mobil:** iOS verbietet JIT. Dort wäre der Pulley-Interpreter nötig (langsamer). Unter Android geht
   Cranelift. *Binärgröße und Laufzeit auf dem Handy ungeprüft.* Pragmatisch laufen Adapter zuerst auf
-  Desktop und heimserver. Das Handy synchronisiert nur Ketten.
+  Desktop und Heimserver. Das Handy synchronisiert nur Ketten.
 
 ### c3. Drei Stufen von Adaptern (ehrlich nach Vertrauen)
 
@@ -195,7 +195,7 @@ Wichtig für Stufe 2: Die Kette gehört immer dem *Symbiot-Adapter*, der mit dem
 signiert „HA meldete um 14:03: Temperatur 21,4 °C“. Der fremde Dienst bekommt nie einen Symbiot-Schlüssel.
 
 **Sensoren (ESP32)** sind keine Adapter. Sie sind echte Geräte mit `symbiot-core` und eigener Kette (F7). MQTT
-ist dafür nur der Transport. Die Signatur steckt im Payload, heimserver prüft sie vor dem Speichern. Bei hoher Frequenz
+ist dafür nur der Transport. Die Signatur steckt im Payload, der Heimserver prüft sie vor dem Speichern. Bei hoher Frequenz
 fasst man Messwerte zusammen: ein Eintrag pro Minute mit Werten oder einem Merkle-Root, sonst wächst die Kette
 zu schnell.
 
@@ -210,8 +210,8 @@ zu schnell.
 - **Updates und Löschungen der Quelle** werden zu neuen Belegen mit derselben `external-id`, nie zu
   Änderungen. Die Projektion zeigt den neuesten Stand und den Verlauf.
 - **Export nach außen:** Ein Beleg oder Grant lässt sich später als **VC 2.0 mit `eddsa-jcs-2022`** ausgeben,
-  denn derselbe Ed25519-Schlüssel genügt. Für „heimserver bezeugt, dass X zum Zeitpunkt T vorlag“ ist **SCITT
-  (RFC 9943)** das passende Modell: heimserver stellt eine Quittung (Receipt) aus. Beides ist ein späterer Schritt und
+  denn derselbe Ed25519-Schlüssel genügt. Für „der Heimserver bezeugt, dass X zum Zeitpunkt T vorlag“ ist **SCITT
+  (RFC 9943)** das passende Modell: Der Heimserver stellt eine Quittung (Receipt) aus. Beides ist ein späterer Schritt und
   ändert das interne Format nicht.
 
 ### c5. MCP: Symbiot spricht mit Agenten
@@ -249,7 +249,7 @@ iframe *mit* CSP, keine Attribute in den Host-DOM übernehmen.
    Projektion erscheint.
 2. **Home Assistant (REST/WebSocket, alternativ über `mcp_server`).** Ein Adapter erschließt Smart Home,
    Klimasensoren, Anwesenheit und über die HA-Companion-App auch einen Teil der Handy- und Gesundheitsdaten.
-   Er läuft auf heimserver neben HA. Testet den Fall „hohe Frequenz → Bündeln“ und später `act` (Licht schalten als
+   Er läuft auf dem Heimserver neben HA. Testet den Fall „hohe Frequenz → Bündeln“ und später `act` (Licht schalten als
    Vorschlag).
 3. **Matrix lesend (Stufe 0, `matrix-sdk`).** Der Besitzer nutzt Matrix schon . Über
    mautrix-Bridges kommen auch andere Messenger herein. Testet E2EE-Schlüssel im Host und personenbezogene Daten
@@ -269,7 +269,7 @@ Android Health Connect bräuchte ein Tauri-Mobile-Plugin, Apple HealthKit einen 
   Kalender X immer mit Ziel Y verknüpfen“)? Das wäre Automatik, also bewusst entscheiden.
 - **Kettenwachstum:** Sensoren und Smart Home erzeugen viele Einträge. Nötig sind Bündelung, Aufbewahrungsregeln
   (Rohpayloads löschen, Hash behalten) und eventuell Snapshots. Das ist im Kern noch nicht vorgesehen.
-- **Gehostete Adapter sehen Klartext.** Für sensible Quellen gilt: nur lokal oder auf heimserver. Das sollte als Feld im
+- **Gehostete Adapter sehen Klartext.** Für sensible Quellen gilt: nur lokal oder auf dem Heimserver. Das sollte als Feld im
   Grant stehen und in der UI sichtbar sein.
 - **Schlüssel auf gehosteten Orten:** Wenn der Adapter-Schlüssel auf einem fremden Host liegt, kann der Betreiber
   in seinem Namen signieren. Der Grant begrenzt den Schaden (Scope, Ablaufdatum), verhindert ihn aber nicht.

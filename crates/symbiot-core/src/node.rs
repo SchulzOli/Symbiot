@@ -907,7 +907,7 @@ mod tests {
     #[test]
     fn replay_newest_wins_and_marks_concurrent_edits() {
         let pc = Signer::from_seed([11; 32]);
-        let heimserver = Signer::from_seed([12; 32]);
+        let server = Signer::from_seed([12; 32]);
         let create = pc.append(
             None,
             100,
@@ -918,29 +918,29 @@ mod tests {
             },
         );
         let id = NodeId::from_entry_hash(&create.hash);
-        // heimserver's clock is behind: its edit carries an earlier time than the node itself.
-        let sz_edit = heimserver.append(None, 50, update(id, "Laufen (heimserver)", &create));
+        // the server's clock is behind: its edit carries an earlier time than the node itself.
+        let server_edit = server.append(None, 50, update(id, "Laufen (Server)", &create));
         let pc_edit = pc.append(Some(&create), 200, update(id, "Laufen (PC)", &create));
         let pc_chain = alloc::vec![create.clone(), pc_edit.clone()];
-        let sz_chain = alloc::vec![sz_edit.clone()];
+        let server_chain = alloc::vec![server_edit.clone()];
 
         let all = |_: &PubKey, _: u64| true;
-        let a = replay(&[&pc_chain, &sz_chain], all);
-        let b = replay(&[&sz_chain, &pc_chain], all);
+        let a = replay(&[&pc_chain, &server_chain], all);
+        let b = replay(&[&server_chain, &pc_chain], all);
         assert_eq!(a, b, "same result whatever order the chains arrive in");
         let n = &a.state.nodes[&id];
         assert_eq!(n.title, "Laufen (PC)", "newest wins");
         assert!(n.concurrent);
         assert_eq!(
             n.history,
-            alloc::vec![create.hash, sz_edit.hash, pc_edit.hash]
+            alloc::vec![create.hash, server_edit.hash, pc_edit.hash]
         );
         assert!(a.skipped.is_empty());
 
         // „Passt so“: a version on top of the current one clears the mark.
         let ok = pc.append(Some(&pc_edit), 300, update(id, "Laufen (PC)", &pc_edit));
         let pc_chain = alloc::vec![create, pc_edit, ok];
-        let c = replay(&[&pc_chain, &sz_chain], all);
+        let c = replay(&[&pc_chain, &server_chain], all);
         assert!(!c.state.nodes[&id].concurrent);
     }
 

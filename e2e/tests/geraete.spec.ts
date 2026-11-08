@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-// M4 / E5 in the web UI on heimserver: set up a new person key, check three words, confirm this device.
+// M4 / E5 in the web UI on the home server: set up a new person key, check three words, confirm this device.
 test("Personen-Schlüssel anlegen und Gerät bestätigen", async ({ page }) => {
   await page.goto("/");
   const devices = page.getByTestId("devices");
@@ -26,9 +26,9 @@ test("Personen-Schlüssel anlegen und Gerät bestätigen", async ({ page }) => {
   await devices.getByRole("button", { name: "Gerät bestätigen" }).click();
 
   await expect(devices.locator(".device-list li")).toHaveCount(1);
-  await expect(devices.locator(".device-list li")).toContainText("heimserver");
+  await expect(devices.locator(".device-list li")).toContainText("Heimserver");
   await expect(devices.locator(".device-list li")).toContainText("dieses Gerät");
-  await expect(devices.getByText("Dies ist heimserver: Hier gleichen deine Geräte ab.")).toBeVisible();
+  await expect(devices.getByText("Dies ist der Heimserver: Hier gleichen deine Geräte ab.")).toBeVisible();
   // The words are gone from the page once confirmed.
   await expect(devices.getByTestId("words")).toHaveCount(0);
 

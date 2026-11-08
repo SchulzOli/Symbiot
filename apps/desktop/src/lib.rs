@@ -105,7 +105,7 @@ fn link_nodes(
     store.with(|s| s.link(from, to, kind))
 }
 
-/// The AI the desktop asks: `SYMBIOT_AI_*` from the environment, e.g. LiteLLM on heimserver via Tailscale.
+/// The AI the desktop asks: `SYMBIOT_AI_*` from the environment, e.g. LiteLLM on the home server via Tailscale.
 struct Ai(Option<Arc<dyn Advisor>>);
 
 #[tauri::command]
@@ -268,10 +268,10 @@ fn revoke(store: State<AppStore>, words: String, device: PubKey) -> Result<Perso
     })
 }
 
-/// M4: where syncing with heimserver stands. Shown under „Geräte“.
+/// M4: where syncing with the home server stands. Shown under „Geräte“.
 #[derive(Clone, Default, serde::Serialize)]
 struct SyncStatus {
-    /// The address of heimserver, if set (in the app, or `SYMBIOT_SYNC_URL` until then).
+    /// The address of the home server, if set (in the app, or `SYMBIOT_SYNC_URL` until then).
     url: Option<String>,
     last_ok_ms: Option<u64>,
     last_error: Option<String>,
@@ -378,7 +378,7 @@ async fn sync_now(
         .map_err(|e| e.to_string())
 }
 
-/// Saves the address of heimserver and syncs right away. Empty switches syncing off.
+/// Saves the address of the home server and syncs right away. Empty switches syncing off.
 #[tauri::command]
 async fn set_sync_url(
     store: State<'_, AppStore>,
@@ -410,7 +410,7 @@ pub fn run() {
             let dir = app.path().app_data_dir()?;
             let store = Arc::new(Mutex::new(Store::open_dir(&dir)?));
             app.manage(AppStore(store.clone()));
-            // M4: sync with heimserver every minute, once an address is set.
+            // M4: sync with the home server every minute, once an address is set.
             let sync = Arc::new(Sync::load(dir.join("sync-url.txt")));
             app.manage(sync.clone());
             std::thread::spawn(move || {

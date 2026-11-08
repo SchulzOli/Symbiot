@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# Symbiot server image: axum server + the Leptos UI, for the home server `heimserver`.
+# Symbiot server image: axum server + the Leptos UI, for the home server.
 
 FROM rust:1-bookworm AS build
 ARG TRUNK_VERSION=0.22.1

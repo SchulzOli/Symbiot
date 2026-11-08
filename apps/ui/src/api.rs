@@ -263,7 +263,7 @@ pub struct SyncReport {
     pub received: usize,
 }
 
-/// Where syncing with heimserver stands — only in the app; heimserver itself is where devices sync.
+/// Where syncing with the home server stands — only in the app; the home server itself is where devices sync.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 pub struct SyncStatus {
     pub url: Option<String>,
@@ -272,7 +272,7 @@ pub struct SyncStatus {
     pub last: Option<SyncReport>,
 }
 
-/// `None` in the browser: the web UI runs on heimserver, which is the hub.
+/// `None` in the browser: the web UI runs on the home server, which is the hub.
 pub async fn sync_status() -> ApiResult<Option<SyncStatus>> {
     #[derive(Serialize)]
     struct NoArgs {}
@@ -288,7 +288,7 @@ pub async fn sync_now() -> ApiResult<SyncStatus> {
     invoke("sync_now", &NoArgs {}).await
 }
 
-/// Saves the address of heimserver in the app and syncs right away. Empty switches syncing off.
+/// Saves the address of the home server in the app and syncs right away. Empty switches syncing off.
 pub async fn set_sync_url(url: String) -> ApiResult<SyncStatus> {
     #[derive(Serialize)]
     struct Args {
@@ -297,7 +297,7 @@ pub async fn set_sync_url(url: String) -> ApiResult<SyncStatus> {
     invoke("set_sync_url", &Args { url }).await
 }
 
-/// Whether this UI runs inside the app (local data) or in the browser on heimserver.
+/// Whether this UI runs inside the app (local data) or in the browser on the home server.
 pub fn in_app() -> bool {
     tauri_invoke_fn().is_some()
 }

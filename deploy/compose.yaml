@@ -1,8 +1,8 @@
-# Symbiot auf heimserver (angelegt per Claude, 2026-10-30)
+# Symbiot auf dem Heimserver (angelegt per Claude, 2026-10-30)
 # Ziel: /opt/stacks/symbiot/compose.yaml, in Komodo als "Files on Server" registriert
 # (Run Directory /opt/stacks/symbiot, "Poll for Updates" + "Auto Update" an → zieht :main selbst).
 #   unterwegs + zu Hause:  https://heimserver.example.ts.net:8449  (tailscale serve im Stack tailscale)
-#   nur lokal auf heimserver:      http://127.0.0.1:8100
+#   nur lokal auf dem Heimserver:      http://127.0.0.1:8100
 # Daten: ./data (SQLite + device.key = Identität des Servers, gehört uid 65532). Ins Backup aufnehmen.
 name: symbiot
 services:
@@ -15,7 +15,7 @@ services:
       SYMBIOT_ADDR: "127.0.0.1:8100"      # nur lokal; von außen nur über Tailscale-HTTPS
       RUST_LOG: info
       TZ: Europe/Berlin
-      # M3: KI über LiteLLM auf heimserver. Schlüssel (SYMBIOT_AI_KEY) steht nur in ./.env, nie hier.
+      # M3: KI über LiteLLM auf dem Heimserver. Schlüssel (SYMBIOT_AI_KEY) steht nur in ./.env, nie hier.
       SYMBIOT_AI_URL: "http://127.0.0.1:8085/v1"
       SYMBIOT_AI_MODEL: "qwen3:8b"
     env_file:

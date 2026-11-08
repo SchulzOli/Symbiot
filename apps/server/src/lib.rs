@@ -1,4 +1,4 @@
-//! Symbiot server — runs on the home server `heimserver`, reachable only via Tailscale.
+//! Symbiot server — runs on the home server, reachable only via Tailscale.
 //! A replica and helper for the devices, never the owner of the data.
 
 use std::path::PathBuf;

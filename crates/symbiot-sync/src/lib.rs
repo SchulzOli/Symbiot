@@ -1,7 +1,7 @@
-//! Symbiot sync (M4, F5): devices exchange chains with heimserver.
+//! Symbiot sync (M4, F5): devices exchange chains with the home server.
 //!
-//! Every request is signed with the device key, so heimserver knows which device asks. Entries carry
-//! their own signatures; heimserver takes in a chain only from a device of its own person (E5), and so
+//! Every request is signed with the device key, so the home server knows which device asks. Entries carry
+//! their own signatures; the home server takes in a chain only from a device of its own person (E5), and so
 //! does every device when it pulls. Syncing twice changes nothing.
 
 use std::sync::{Mutex, MutexGuard};
@@ -70,10 +70,10 @@ pub struct Pushed {
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("heimserver nicht erreichbar: {0}")]
+    #[error("Heimserver nicht erreichbar: {0}")]
     Http(String),
-    /// heimserver answered with an error, e.g. „Gerät gehört nicht zu diesem Personen-Schlüssel“.
-    #[error("heimserver: {0}")]
+    /// the home server answered with an error, e.g. „Gerät gehört nicht zu diesem Personen-Schlüssel“.
+    #[error("Heimserver: {0}")]
     Remote(String),
     #[error(transparent)]
     Store(#[from] symbiot_store::Error),
@@ -86,7 +86,7 @@ pub struct Report {
     pub received: usize,
 }
 
-/// heimserver, as seen from a device.
+/// The home server, as seen from a device.
 pub struct Remote {
     base: String,
     agent: ureq::Agent,
@@ -211,7 +211,7 @@ impl Remote {
     }
 }
 
-/// One round: send what heimserver does not have of this device's chain, then fetch every chain heimserver
+/// One round: send what the home server does not have of this device's chain, then fetch every chain the home server
 /// knows further than this device. The own chain goes first, so a newly set up device
 /// introduces itself with its certificate before it asks for anything.
 pub fn sync(store: &Mutex<Store>, remote: &Remote) -> Result<Report, Error> {

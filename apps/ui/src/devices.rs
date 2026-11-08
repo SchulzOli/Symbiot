@@ -1,4 +1,4 @@
-//! M4: the person key (E5), the person's devices, and syncing with heimserver.
+//! M4: the person key (E5), the person's devices, and syncing with the home server.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -40,7 +40,7 @@ fn Setup(on_saved: impl Fn() + Copy + Send + Sync + 'static) -> impl IntoView {
     let checks = RwSignal::new(Vec::<(usize, RwSignal<String>)>::new());
     let existing = RwSignal::new(String::new());
     let use_existing = RwSignal::new(false);
-    let name = RwSignal::new(if api::in_app() { "PC" } else { "heimserver" }.to_string());
+    let name = RwSignal::new(if api::in_app() { "PC" } else { "Heimserver" }.to_string());
     let error = RwSignal::new(None::<String>);
 
     let start = move |_| {
@@ -107,7 +107,7 @@ fn Setup(on_saved: impl Fn() + Copy + Send + Sync + 'static) -> impl IntoView {
     view! {
         <div class="setup" data-testid="setup">
             <p>
-                "Mit einem Personen-Schlüssel bestätigst du deine Geräte. Danach gleichen sie über heimserver ab, "
+                "Mit einem Personen-Schlüssel bestätigst du deine Geräte. Danach gleichen sie über den Heimserver ab, "
                 "und ein verlorenes Gerät kannst du widerrufen."
             </p>
             <div class="row">
@@ -220,8 +220,8 @@ fn DeviceRow(
     }
 }
 
-/// In the app: the address of heimserver, when this device last synced, and a button to sync now.
-/// In the browser the UI runs on heimserver itself, the hub.
+/// In the app: the address of the home server, when this device last synced, and a button to sync now.
+/// In the browser the UI runs on the home server itself, the hub.
 #[component]
 fn SyncState(on_saved: impl Fn() + Copy + Send + Sync + 'static) -> impl IntoView {
     // `None` until loaded; `Some(None)` in the browser.
@@ -275,18 +275,18 @@ fn SyncState(on_saved: impl Fn() + Copy + Send + Sync + 'static) -> impl IntoVie
         {move || match current.get() {
             None => view! { <span></span> }.into_any(),
             Some(None) => view! {
-                <p class="muted">"Dies ist heimserver: Hier gleichen deine Geräte ab."</p>
+                <p class="muted">"Dies ist der Heimserver: Hier gleichen deine Geräte ab."</p>
             }
             .into_any(),
             Some(Some(s)) => view! {
                 <form class="sync-address row" on:submit=save>
                     <label class="row">
-                        "Adresse von heimserver"
+                        "Adresse des Heimservers"
                         <input
                             type="text"
                             placeholder="https://heimserver.example.ts.net:8449"
                             bind:value=address
-                            aria-label="Adresse von heimserver"
+                            aria-label="Adresse des Heimservers"
                         />
                     </label>
                     <button type="submit" class="chip" disabled=move || busy.get()>"Speichern"</button>
@@ -301,7 +301,7 @@ fn SyncState(on_saved: impl Fn() + Copy + Send + Sync + 'static) -> impl IntoVie
                     }
                     .into_any(),
                     None => view! {
-                        <p class="muted">"Kein Abgleich eingerichtet: Adresse von heimserver eintragen und speichern."</p>
+                        <p class="muted">"Kein Abgleich eingerichtet: Adresse des Heimservers eintragen und speichern."</p>
                     }
                     .into_any(),
                 }}
