@@ -22,18 +22,21 @@ use symbiot_core::{
 /// 6: `evidence` knows its origin, `evidence_fts` indexes the words (#30); rebuilt from the ledger.
 /// 7: `evidence_file` lists the files raw data references (#28); rebuilt from the ledger.
 /// 8: `evidence_actor` (identifiers per item) and `identity_decision` (#31); rebuilt.
-const SCHEMA_VERSION: i64 = 8;
+/// 9: `evidence.scope`, `evidence.loaded_ms` and `source_grant` (#44); rebuilt.
+const SCHEMA_VERSION: i64 = 9;
 
 mod actions;
 mod evidence;
 mod files;
 mod persons;
+mod sources;
 mod sync;
 
 pub use actions::{Executed, Outcome};
 pub use evidence::{EvidenceQuery, Origin, Recorded, StoredEvidence};
 pub use files::{FileInfo, MAX_FILE_BYTES};
 pub use persons::{Identifier, Person, Suggestion};
+pub use sources::{Scope, SourceInfo};
 
 pub use symbiot_core::VerifyReport;
 pub use sync::{ChainHead, DeviceInfo, new_words};
@@ -78,6 +81,8 @@ pub enum Error {
     /// E16: a suggestion that cannot be carried out as it is.
     #[error("Vorschlag: {0}")]
     Suggestion(String),
+    #[error("JSON: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -219,16 +224,18 @@ impl Store {
                  PRIMARY KEY (author, seq, hash)
              );",
         )?;
-        if version > 0 && version < 8 {
+        if version > 0 && version < 9 {
             conn.execute_batch(evidence::DROP)?;
         }
         conn.execute_batch(evidence::SCHEMA)?;
         conn.execute_batch(persons::SCHEMA)?;
+        conn.execute_batch(sources::SCHEMA)?;
         if version > 0 && version < SCHEMA_VERSION {
             // Only the projection changed shape; the ledger is the truth.
             let tx = conn.unchecked_transaction()?;
             rebuild_projection(&tx, &signer.public())?;
             evidence::rebuild_evidence(&tx)?;
+            sources::prune_revoked(&tx)?;
             tx.commit()?;
         }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -507,7 +514,9 @@ fn append_in(tx: &Connection, signer: &Signer, op: Op) -> Result<Change> {
         | Op::RemoveSensitivityRule { .. }
         | Op::RecordEvidence { .. }
         | Op::DecideIdentity { .. }
-        | Op::DecideSuggestion { .. } => vec![],
+        | Op::DecideSuggestion { .. }
+        | Op::GrantSource { .. }
+        | Op::RevokeSource { .. } => vec![],
         Op::UpdateNode { node, .. }
         | Op::MarkSensitive { node, .. }
         | Op::DeleteNode { node }
@@ -550,6 +559,9 @@ fn append_in(tx: &Connection, signer: &Signer, op: Op) -> Result<Change> {
         ),
         ApplyError::Undecodable(_) => Error::Invalid("Eintrag nicht lesbar"),
         ApplyError::BadEvidence => Error::Invalid("Rohdaten verletzen das Format (E14)"),
+        ApplyError::BadSource => Error::Invalid(
+            "Quelle ungültig: Name aus Kleinbuchstaben, Ziffern, - und _; Auswahl ohne leere Namen",
+        ),
         ApplyError::BadIdentity => {
             Error::Invalid("Zusammenführen braucht zwei verschiedene Kennungen mit Schema")
         }
@@ -622,6 +634,7 @@ fn project(tx: &Connection, change: &Change) -> Result<()> {
         Change::Rejected | Change::Device | Change::Suggestion { .. } => {}
         Change::Evidence { .. } => evidence::project_evidence(tx, change)?,
         Change::Identity { .. } => persons::project_identity(tx, change)?,
+        Change::Source { .. } => sources::project_source(tx, change)?,
         Change::Sensitivity { node, sensitive } => {
             tx.execute(
                 "INSERT OR REPLACE INTO by_hand (node_id, sensitive) VALUES (?1, ?2)",
@@ -791,8 +804,10 @@ fn rebuild_projection(tx: &Connection, me: &PubKey) -> Result<()> {
     }
     tx.execute_batch(
         "DELETE FROM nodes; DELETE FROM edges; DELETE FROM sensitive; DELETE FROM policies;
-         DELETE FROM by_hand; DELETE FROM rules; DELETE FROM identity_decision;",
+         DELETE FROM by_hand; DELETE FROM rules; DELETE FROM identity_decision;
+         DELETE FROM source_grant;",
     )?;
+    sources::project_all(tx, &r.state.sources)?;
     for (entry, decision) in &r.state.identity {
         persons::project_identity(
             tx,

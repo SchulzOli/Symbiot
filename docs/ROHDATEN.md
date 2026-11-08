@@ -125,10 +125,28 @@ der Zahl der Belege. „Zeitleiste zeigen“ öffnet alles von dieser Person üb
   Themen, #32). Personen brauchen sie nicht: Regeln lassen sich jederzeit neu rechnen, und alles andere entscheidet
   der Mensch.
 
+## Quellen: was genutzt wird (#44)
+
+Der Reiter **Quellen** (Taste 5) zeigt jede Quelle als Weg der Daten: Adapter → Quelle → genutzt. Eine Quelle ist
+die Herkunft der Rohdaten (der Teil der Id vor `:`, z. B. `whatsapp`, `mail`, `git`). Pro Quelle entscheidet der
+Mensch:
+
+- **Pausieren:** Die Rohdaten bleiben, werden aber nirgends genutzt (Zeitleiste, Suche, Personen, KI).
+- **Auslassen:** einzelne Chats oder Repositories (Feld `chat` bzw. `repo` des Belegs).
+- **Zeitraum:** nur die letzten N Tage.
+- **Widerrufen:** Die Rohdaten, die bis dahin geladen waren, werden auf allen Geräten gelöscht (E2): aus der
+  Kette, wo ein ganzes Bündel zur Quelle gehört, sonst aus der Ansicht; nicht mehr verwendete Dateien ebenso. Die
+  Schlüssel bleiben, dieselben Belege werden also nicht erneut geladen. Eine spätere Freigabe lässt neue Daten zu.
+
+Die Entscheidungen sind Einträge in der Kette (Art 17 `GrantSource`, Art 18 `RevokeSource`); was ausgelassen wird,
+steht im entfernbaren Inhalt. Die neueste Entscheidung gilt, egal in welcher Reihenfolge sie beim Abgleich
+ankommt. Adapter laden weiter; was nicht genutzt wird, wird nur nicht gezeigt. Der Assistent kann dieselben
+Entscheidungen vorschlagen (E16), ausgeführt werden sie erst nach Bestätigung.
+
 ## Noch nicht enthalten
 
 - Einzelne Belege löschen (das Entfernen eines Teils statt des ganzen Bündels). Kommt mit „Aufgeräumt“ (E13).
-- Freigabe pro Adapter (`Grant`, E7, E10). Bis dahin gilt: Ein Adapter ist ein bestätigtes Gerät der Person.
+- Importe aus der App starten, und pro Quelle festlegen, ob Rohdaten das Gerät verlassen dürfen (#44).
 - Live-Adapter (M9).
 - Dateien sind wie die Datenbank noch unverschlüsselt (E6, #22).
 - Jedes Gerät lädt beim Abgleich alle fehlenden Dateien. Eine Auswahl (z. B. Fotos nur auf dem Heimserver) fehlt.

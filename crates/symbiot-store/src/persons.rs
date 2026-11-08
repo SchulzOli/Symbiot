@@ -139,11 +139,12 @@ impl Store {
     }
 
     fn seen(&self) -> Result<HashMap<String, Seen>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare(&format!(
             "SELECT a.actor, a.name, e.at_ms, e.origin FROM evidence_actor AS a
              JOIN evidence AS e ON e.key = a.key
-             WHERE e.item IS NOT NULL",
-        )?;
+             WHERE e.item IS NOT NULL AND {}",
+            crate::sources::USED
+        ))?;
         let mut seen: HashMap<String, Seen> = HashMap::new();
         let rows = stmt.query_map([], |r| {
             Ok((

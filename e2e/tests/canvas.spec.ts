@@ -72,7 +72,7 @@ test("Canvas: verbinden mit Maus und Tastatur, Symbole mit Namen, WCAG-Prüfung"
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("detail")).toHaveCount(0);
 
-  for (const [key, view] of [["2", "Liste"], ["3", "Zeitleiste"], ["4", "Personen"], ["1", "Canvas"]]) {
+  for (const [key, view] of [["2", "Liste"], ["3", "Zeitleiste"], ["4", "Personen"], ["5", "Quellen"], ["1", "Canvas"]]) {
     await page.locator("body").press(key);
     await expect(page.getByRole("button", { name: view, exact: true })).toHaveAttribute("aria-pressed", "true");
     await axe(page, view);

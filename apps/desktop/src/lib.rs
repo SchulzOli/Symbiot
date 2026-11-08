@@ -280,6 +280,25 @@ fn keep_apart(store: State<AppStore>, a: String, b: String) -> Result<(), String
     store.with(|s| s.keep_apart(&a, &b))
 }
 
+#[tauri::command]
+fn list_sources(store: State<AppStore>) -> Result<Vec<symbiot_store::SourceInfo>, String> {
+    store.with(|s| s.sources())
+}
+
+#[tauri::command]
+fn grant_source(
+    store: State<AppStore>,
+    source: String,
+    grant: symbiot_core::source::Grant,
+) -> Result<(), String> {
+    store.with(|s| s.grant_source(&source, grant))
+}
+
+#[tauri::command]
+fn revoke_source(store: State<AppStore>, source: String) -> Result<usize, String> {
+    store.with(|s| s.revoke_source(&source))
+}
+
 /// Pictures up to this size are shown in the app (#28); larger ones only by name.
 const MAX_PICTURE_BYTES: u64 = 8 * 1024 * 1024;
 
@@ -597,6 +616,9 @@ pub fn run() {
             merge_identities,
             split_identity,
             keep_apart,
+            list_sources,
+            grant_source,
+            revoke_source,
             assist,
             decide_suggestion
         ])

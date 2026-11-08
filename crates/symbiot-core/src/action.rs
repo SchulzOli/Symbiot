@@ -124,6 +124,15 @@ pub enum Action {
         a: String,
         b: String,
     },
+    /// #44: how a source's raw data is used.
+    GrantSource {
+        source: String,
+        grant: crate::source::Grant,
+    },
+    /// #44: a source is no longer used, its raw data is removed.
+    RevokeSource {
+        source: String,
+    },
 }
 
 /// What the AI may do, for its prompt and for tools (MCP): name, what it does, an example.
@@ -187,6 +196,16 @@ pub const CATALOG: &[(&str, &str, &str)] = &[
         "keep_apart",
         "Zwei Kennungen sind nicht dieselbe Person",
         r#"{"keep_apart": {"a": "name:Anna", "b": "telegram:user1"}}"#,
+    ),
+    (
+        "grant_source",
+        "Festlegen, wie eine Quelle genutzt wird: aktiv oder pausiert, ausgelassene Chats/Repos, nur die letzten N Tage (0 = alle)",
+        r#"{"grant_source": {"source": "whatsapp", "grant": {"active": true, "exclude": ["Arbeit"], "keep_days": 0}}}"#,
+    ),
+    (
+        "revoke_source",
+        "Eine Quelle widerrufen: wird nicht mehr genutzt, ihre Rohdaten werden gelöscht",
+        r#"{"revoke_source": {"source": "whatsapp"}}"#,
     ),
 ];
 
@@ -266,6 +285,10 @@ impl Suggestion {
                 Action::MergeIdentities { ids, .. } => ids.len() < 2,
                 Action::SplitIdentity { id } => id.trim().is_empty(),
                 Action::KeepApart { a, b } => a.trim().is_empty() || b.trim().is_empty(),
+                Action::GrantSource { source, grant } => {
+                    !crate::source::valid_source(source) || !grant.valid()
+                }
+                Action::RevokeSource { source } => !crate::source::valid_source(source),
                 _ => false,
             };
             if incomplete {

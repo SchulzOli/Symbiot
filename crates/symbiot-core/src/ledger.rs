@@ -25,6 +25,7 @@ use crate::kind;
 use crate::merkle;
 use crate::node::NodeKind;
 use crate::proposal::Proposal;
+use crate::source::Grant;
 
 /// Domain separation: an entry hash can never be mistaken for a leaf, tree or checkpoint hash.
 const ENTRY_DOMAIN: &[u8] = b"symbiot/entry/v2";
@@ -129,6 +130,18 @@ pub enum Op {
         chosen: Vec<u32>,
         suggestion: Suggestion,
     },
+    /// #44: how the raw data of a source is used. The source name is in the head; what is
+    /// left out names chats or repositories, so it is content (removable).
+    GrantSource {
+        source: String,
+        grant: Grant,
+    },
+    /// #44: the source is no longer used and its raw data loaded until now is removed on every
+    /// device (E2). Keys stay, so the same items are not loaded again. A later
+    /// `GrantSource` lets new data in again.
+    RevokeSource {
+        source: String,
+    },
 }
 
 fn enc<T: Serialize + ?Sized>(v: &T) -> Vec<u8> {
@@ -223,6 +236,8 @@ impl Op {
                 enc(&(accepted, chosen, &suggestion.model)),
                 Some(enc(suggestion)),
             ),
+            Op::GrantSource { source, grant } => (kind::GRANT, enc(source), Some(enc(grant))),
+            Op::RevokeSource { source } => (kind::REVOKE, enc(source), None),
             Op::DecideIdentity { decision } => {
                 let tag: u8 = match decision {
                     Decision::Merge { .. } => 1,
@@ -454,6 +469,14 @@ impl LedgerEntry {
                     _ => return Err(Decode::Malformed),
                 }
             }
+            kind::GRANT => match self.content.as_deref() {
+                Some([part]) => Op::GrantSource {
+                    source: dec(p)?,
+                    grant: dec(&part.data.0)?,
+                },
+                _ => return Err(Decode::Malformed),
+            },
+            kind::REVOKE => Op::RevokeSource { source: dec(p)? },
             // A decision whose content was removed no longer says anything: it is skipped.
             kind::DECIDE_IDENTITY => match self.content.as_deref() {
                 Some([part]) => Op::DecideIdentity {
@@ -799,6 +822,17 @@ mod tests {
                 deletable: false,
                 exportable: true,
             },
+            Op::GrantSource {
+                source: "whatsapp".into(),
+                grant: Grant {
+                    active: true,
+                    exclude: alloc::vec!["Arbeit".into()],
+                    keep_days: 30,
+                },
+            },
+            Op::RevokeSource {
+                source: "whatsapp".into(),
+            },
         ];
         let c = build_chain(&s, ops.iter().cloned().map(|op| (1, op)));
         for (e, op) in c.iter().zip(&ops) {
@@ -807,6 +841,9 @@ mod tests {
         assert_eq!(verify_chain(&c), Ok(ops.len()));
         // Links and markers carry no content.
         assert!(c[2].content.is_none() && c[5].content.is_none());
+        // #44: what a source leaves out names chats, so it is removable content.
+        assert_eq!(c[9].head.kind, kind::GRANT);
+        assert!(c[9].content.is_some() && c[10].content.is_none());
     }
 
     /// Updates written before M4 have no base; their params keep the old form and still decode.

@@ -12,6 +12,7 @@ mod devices;
 mod icons;
 mod persons;
 mod rules;
+mod sources;
 mod timeline;
 
 use leptos::ev;
@@ -37,10 +38,18 @@ enum Mode {
     Timeline,
     /// #31: persons across all sources.
     Persons,
+    /// #44: which raw data is used, per source.
+    Sources,
 }
 
 impl Mode {
-    const ALL: [Mode; 4] = [Mode::Canvas, Mode::List, Mode::Timeline, Mode::Persons];
+    const ALL: [Mode; 5] = [
+        Mode::Canvas,
+        Mode::List,
+        Mode::Timeline,
+        Mode::Persons,
+        Mode::Sources,
+    ];
 
     fn label(self) -> &'static str {
         match self {
@@ -48,6 +57,7 @@ impl Mode {
             Mode::List => "Liste",
             Mode::Timeline => "Zeitleiste",
             Mode::Persons => "Personen",
+            Mode::Sources => "Quellen",
         }
     }
 
@@ -57,6 +67,7 @@ impl Mode {
             Mode::List => Icon::List,
             Mode::Timeline => Icon::Timeline,
             Mode::Persons => Icon::Persons,
+            Mode::Sources => Icon::Sources,
         }
     }
 
@@ -66,6 +77,7 @@ impl Mode {
             Mode::List => "2",
             Mode::Timeline => "3",
             Mode::Persons => "4",
+            Mode::Sources => "5",
         }
     }
 }
@@ -111,7 +123,7 @@ fn App() -> impl IntoView {
             mode.set(Mode::Timeline);
         }
     });
-    let raw = move || matches!(mode.get(), Mode::Timeline | Mode::Persons);
+    let raw = move || matches!(mode.get(), Mode::Timeline | Mode::Persons | Mode::Sources);
     let selected = RwSignal::new(None::<NodeId>);
     // One side panel at a time: opening a node closes the others, and the other way round.
     Effect::new(move |_| {
@@ -138,7 +150,7 @@ fn App() -> impl IntoView {
         load()
     });
 
-    // Shortcuts: 1–4 views, N new entry, Esc closes the open panel.
+    // Shortcuts: 1–5 views, N new entry, Esc closes the open panel.
     let title_input = NodeRef::<leptos::html::Input>::new();
     let _keys = window_event_listener(ev::keydown, move |ev| {
         if ev.ctrl_key() || ev.meta_key() || ev.alt_key() {
@@ -228,6 +240,7 @@ fn App() -> impl IntoView {
                 })}
                 {move || (mode.get() == Mode::Timeline).then(|| view! { <timeline::Timeline refresh=version person /> })}
                 {move || (mode.get() == Mode::Persons).then(|| view! { <persons::Persons refresh=version on_saved=saved show=person /> })}
+                {move || (mode.get() == Mode::Sources).then(|| view! { <sources::Sources refresh=version on_saved=saved /> })}
                 {move || match data.get() {
                     _ if raw() => ().into_any(),
                     None => view! { <p class="muted">"Lade …"</p> }.into_any(),
@@ -254,7 +267,7 @@ fn App() -> impl IntoView {
                                     }).collect_view()}
                                 </section>
                             }.into_any(),
-                            Mode::Timeline | Mode::Persons => ().into_any(),
+                            Mode::Timeline | Mode::Persons | Mode::Sources => ().into_any(),
                         }
                     }
                 }}

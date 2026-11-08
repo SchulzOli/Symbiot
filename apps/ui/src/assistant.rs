@@ -216,6 +216,10 @@ fn describe(a: &Action, s: &Suggestion, nodes: &[Node]) -> String {
         Action::MergeIdentities { ids, .. } => format!("Eine Person: {}", ids.join(", ")),
         Action::SplitIdentity { id } => format!("Als eigene Person führen: {id}"),
         Action::KeepApart { a, b } => format!("Nicht dieselbe Person: {a} und {b}"),
+        Action::GrantSource { source, grant } => crate::sources::describe(source, grant),
+        Action::RevokeSource { source } => {
+            format!("Quelle {source} widerrufen und ihre Rohdaten löschen")
+        }
     }
 }
 

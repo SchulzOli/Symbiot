@@ -15,13 +15,14 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use symbiot_ai::Advisor;
 use symbiot_core::action::Suggestion;
+use symbiot_core::source::Grant;
 use symbiot_core::{
     Edge, EdgeId, EdgeKind, Hash, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal, PubKey,
     Rule, RuleId,
 };
 use symbiot_store::{
     ChainHead, DeviceInfo, EvidenceQuery, Origin, Outcome, Person, Sensitivity as NodeSensitivity,
-    Store, StoredEvidence, Suggestion as PersonSuggestion, VerifyReport,
+    SourceInfo, Store, StoredEvidence, Suggestion as PersonSuggestion, VerifyReport,
 };
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
@@ -74,6 +75,9 @@ pub fn app(store: Store, ui_dir: Option<PathBuf>, ai: Option<Arc<dyn Advisor>>) 
         .route("/persons/merge", post(merge_persons))
         .route("/persons/split", post(split_person))
         .route("/persons/apart", post(keep_apart))
+        .route("/sources", get(list_sources))
+        .route("/sources/grant", post(grant_source))
+        .route("/sources/revoke", post(revoke_source))
         .route("/ledger", get(ledger))
         .route("/ledger/verify", get(verify))
         .route("/ledger/verify-all", get(verify_all))
@@ -226,6 +230,43 @@ async fn keep_apart(
 ) -> Result<StatusCode, ApiError> {
     lock(&s).keep_apart(&r.a, &r.b)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn list_sources(State(s): State<Shared>) -> Result<Json<Vec<SourceInfo>>, ApiError> {
+    Ok(Json(lock(&s).sources()?))
+}
+
+#[derive(Deserialize)]
+pub struct GrantRequest {
+    pub source: String,
+    pub grant: Grant,
+}
+
+async fn grant_source(
+    State(s): State<Shared>,
+    Json(r): Json<GrantRequest>,
+) -> Result<StatusCode, ApiError> {
+    lock(&s).grant_source(&r.source, r.grant)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct RevokeSourceRequest {
+    pub source: String,
+}
+
+#[derive(Serialize)]
+pub struct Revoked {
+    /// Items whose raw data was removed here.
+    pub removed: usize,
+}
+
+async fn revoke_source(
+    State(s): State<Shared>,
+    Json(r): Json<RevokeSourceRequest>,
+) -> Result<Json<Revoked>, ApiError> {
+    let removed = lock(&s).revoke_source(&r.source)?;
+    Ok(Json(Revoked { removed }))
 }
 
 async fn evidence_origins(State(s): State<Shared>) -> Result<Json<Vec<Origin>>, ApiError> {
@@ -886,7 +927,7 @@ impl From<symbiot_store::Error> for ApiError {
                 tracing::error!(error = %e, "fork in a chain");
                 ApiError(StatusCode::CONFLICT, e.to_string())
             }
-            Sqlite(_) | Encoding(_) => {
+            Sqlite(_) | Encoding(_) | Json(_) => {
                 tracing::error!(error = %e, "store failure");
                 ApiError(StatusCode::INTERNAL_SERVER_ERROR, "interner Fehler".into())
             }

@@ -79,6 +79,10 @@ impl Store {
             Action::MergeIdentities { ids, name } => self.merge_identities(ids, name)?,
             Action::SplitIdentity { id } => self.split_identity(id)?,
             Action::KeepApart { a, b } => self.keep_apart(a, b)?,
+            Action::GrantSource { source, grant } => self.grant_source(source, grant.clone())?,
+            Action::RevokeSource { source } => {
+                self.revoke_source(source)?;
+            }
         }
         Ok(None)
     }

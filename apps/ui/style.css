@@ -511,3 +511,55 @@ button.link {
 .suggestion-card legend { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 4px; }
 .action-line { display: flex; gap: 8px; align-items: flex-start; overflow-wrap: anywhere; }
 .action-line input { margin-top: 4px; }
+
+/* #44: sources as pipelines — adapter → source → used */
+.sources, .pipelines { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+.sources > p { margin: 0; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.pipeline { display: grid; gap: 10px; overflow-wrap: anywhere; border-left: 4px solid var(--accent); }
+.pipeline.state-paused { border-left-color: var(--muted); }
+.pipeline.state-revoked { border-left-color: var(--error); }
+.stages {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1fr); gap: 28px;
+}
+.stage { display: flex; flex-direction: column; gap: 4px; position: relative; min-width: 0; }
+.stage + .stage::before {
+  /* the arrow between two stages */
+  content: "→"; position: absolute; left: -22px; top: 50%; transform: translateY(-50%);
+  color: var(--muted); font-size: 1.1rem;
+}
+.stage-label {
+  font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+}
+.stage h3 { margin: 0; font-size: 1.05rem; }
+.adapter { display: inline-flex; gap: 6px; align-items: center; font-size: 0.9rem; }
+.adapter .icon { width: 16px; height: 16px; }
+.badge {
+  align-self: flex-start; font-size: 0.75rem; padding: 0 8px; border-radius: 999px;
+  border: 1px solid currentColor;
+}
+.badge.active { color: var(--ok); }
+.badge.paused { color: var(--muted); }
+.badge.revoked { color: var(--error); }
+.controls { gap: 8px; flex-wrap: wrap; align-items: center; }
+.days { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); }
+.days select { color: var(--text); }
+.confirm { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--error); border-radius: 8px; }
+.confirm p { margin: 0; }
+.scopes { border: none; padding: 0; margin: 0; display: grid; gap: 4px; }
+.scopes legend {
+  font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 4px;
+}
+.scope { display: flex; gap: 8px; align-items: center; }
+@media (max-width: 720px) {
+  .stages { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  .stage + .stage::before { content: "↓"; left: 0; top: -18px; transform: none; }
+}
+/* A symbol button that deletes: red symbol on the surface; filled only to confirm. */
+button.icon-btn.danger { background: transparent; color: var(--error); border-color: var(--border); }
+button.icon-btn.danger:hover { border-color: var(--error); }
+.confirm button.icon-btn.danger { background: var(--error); color: var(--surface); border-color: var(--error); }

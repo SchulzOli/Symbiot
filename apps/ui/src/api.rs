@@ -3,6 +3,7 @@
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use symbiot_core::source::Grant;
 use symbiot_core::{
     Edge, EdgeId, EdgeKind, Evidence, Hash, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal,
     PubKey, Rule, RuleId, VerifyReport,
@@ -520,6 +521,70 @@ pub async fn keep_apart(a: String, b: String) -> ApiResult<()> {
         return invoke("keep_apart", &args).await;
     }
     http_empty(gloo_net::http::Request::post("/api/persons/apart").json(&args)).await
+}
+
+/// #44: a source as the person manages it (see `symbiot_store::SourceInfo`).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct SourceInfo {
+    pub source: String,
+    pub grant: Grant,
+    pub decided_ms: Option<u64>,
+    pub revoked_ms: Option<u64>,
+    pub items: usize,
+    pub used: usize,
+    pub first_ms: Option<u64>,
+    pub last_ms: Option<u64>,
+    pub loaded_ms: Option<u64>,
+    pub adapters: Vec<String>,
+    pub scopes: Vec<Scope>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct Scope {
+    pub name: String,
+    pub items: usize,
+    pub excluded: bool,
+}
+
+pub async fn list_sources() -> ApiResult<Vec<SourceInfo>> {
+    #[derive(Serialize)]
+    struct NoArgs {}
+    if tauri_invoke_fn().is_some() {
+        return invoke("list_sources", &NoArgs {}).await;
+    }
+    http_json(gloo_net::http::Request::get("/api/sources").build()).await
+}
+
+pub async fn grant_source(source: String, grant: Grant) -> ApiResult<()> {
+    #[derive(Serialize)]
+    struct Args {
+        source: String,
+        grant: Grant,
+    }
+    let args = Args { source, grant };
+    if tauri_invoke_fn().is_some() {
+        return invoke("grant_source", &args).await;
+    }
+    http_empty(gloo_net::http::Request::post("/api/sources/grant").json(&args)).await
+}
+
+/// Returns how many items lost their raw data.
+pub async fn revoke_source(source: String) -> ApiResult<usize> {
+    #[derive(Serialize)]
+    struct Args {
+        source: String,
+    }
+    let args = Args { source };
+    if tauri_invoke_fn().is_some() {
+        return invoke("revoke_source", &args).await;
+    }
+    #[derive(Deserialize)]
+    struct Revoked {
+        removed: usize,
+    }
+    let r: Revoked =
+        http_json(gloo_net::http::Request::post("/api/sources/revoke").json(&args)).await?;
+    Ok(r.removed)
 }
 
 /// #28: types the UI shows as a picture. The same list as the server's inline types.
