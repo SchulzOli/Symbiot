@@ -16,8 +16,11 @@ const PAGE: usize = 50;
 /// Longer texts are cut here; the rest is one click away.
 const PREVIEW: usize = 400;
 
+/// The person whose timeline is shown (#31): an identifier and the name to show.
+pub type PersonFilter = RwSignal<Option<(String, String)>>;
+
 #[component]
-pub fn Timeline(refresh: RwSignal<u32>) -> impl IntoView {
+pub fn Timeline(refresh: RwSignal<u32>, person: PersonFilter) -> impl IntoView {
     let input = RwSignal::new(String::new());
     let query = RwSignal::new(String::new());
     let origin = RwSignal::new(None::<String>);
@@ -31,6 +34,7 @@ pub fn Timeline(refresh: RwSignal<u32>) -> impl IntoView {
     });
 
     let filter = move |offset: usize| EvidenceFilter {
+        person: person.get_untracked().map(|(id, _)| id),
         q: Some(query.get_untracked()).filter(|q| !q.trim().is_empty()),
         origin: origin.get_untracked(),
         limit: Some(PAGE),
@@ -59,6 +63,7 @@ pub fn Timeline(refresh: RwSignal<u32>) -> impl IntoView {
     Effect::new(move |_| {
         query.track();
         origin.track();
+        person.track();
         refresh.track();
         load(0);
     });
@@ -82,6 +87,12 @@ pub fn Timeline(refresh: RwSignal<u32>) -> impl IntoView {
 
     view! {
         <section class="timeline" data-testid="timeline">
+            {move || person.get().map(|(_, name)| view! {
+                <div class="row">
+                    <span class="chip active" data-testid="person-filter">{format!("Person: {name}")}</span>
+                    <button class="link" on:click=move |_| person.set(None)>"alle zeigen"</button>
+                </div>
+            })}
             <form class="row" on:submit=search>
                 <input
                     type="search"
@@ -107,7 +118,10 @@ pub fn Timeline(refresh: RwSignal<u32>) -> impl IntoView {
                 if all.is_empty() {
                     let text = if loading.get() {
                         "Lade …"
-                    } else if !query.get().trim().is_empty() || origin.get().is_some() {
+                    } else if !query.get().trim().is_empty()
+                        || origin.get().is_some()
+                        || person.get().is_some()
+                    {
                         "Nichts gefunden."
                     } else {
                         "Noch keine Rohdaten. Importieren mit symbiot-import, siehe docs/ROHDATEN.md."

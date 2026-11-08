@@ -26,3 +26,6 @@ pub const PRUNED: u16 = 23;
 pub const EVIDENCE_BATCH: u16 = 24;
 pub const SENSOR_BATCH: u16 = 25;
 pub const ROLLUP: u16 = 26;
+
+// E14, M8: the human's decisions about which identifiers are one person (#31).
+pub const DECIDE_IDENTITY: u16 = 27;

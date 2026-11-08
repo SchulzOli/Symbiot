@@ -4,6 +4,7 @@ mod api;
 mod detail;
 mod devices;
 mod graph;
+mod persons;
 mod rules;
 mod timeline;
 
@@ -23,6 +24,8 @@ enum Mode {
     Graph,
     /// #30: raw data (E14), not the graph.
     Timeline,
+    /// #31: persons across all sources.
+    Persons,
 }
 
 async fn load() -> Result<(Vec<Node>, Vec<Edge>, Vec<NodeId>), String> {
@@ -37,6 +40,14 @@ async fn load() -> Result<(Vec<Node>, Vec<Edge>, Vec<NodeId>), String> {
 fn App() -> impl IntoView {
     let filter = RwSignal::new(None::<NodeKind>);
     let mode = RwSignal::new(Mode::List);
+    // #31: the person whose timeline is shown; choosing one switches to the timeline.
+    let person = RwSignal::new(None::<(String, String)>);
+    Effect::new(move |_| {
+        if person.get().is_some() {
+            mode.set(Mode::Timeline);
+        }
+    });
+    let raw = move || matches!(mode.get(), Mode::Timeline | Mode::Persons);
     let selected = RwSignal::new(None::<NodeId>);
     // Bumped after every write so everything reloads.
     let version = RwSignal::new(0u32);
@@ -61,16 +72,18 @@ fn App() -> impl IntoView {
             {move || (set_up() == Some(false)).then(|| view! { <devices::Devices refresh=version on_saved=saved /> })}
             <Capture on_saved=saved />
             <nav class="row between">
-                {move || (mode.get() != Mode::Timeline).then(|| view! { <Filter filter /> })}
+                {move || (!raw()).then(|| view! { <Filter filter /> })}
                 <div class="tabs">
                     <button class="chip" class:active=move || mode.get() == Mode::List on:click=move |_| mode.set(Mode::List)>"Liste"</button>
                     <button class="chip" class:active=move || mode.get() == Mode::Graph on:click=move |_| mode.set(Mode::Graph)>"Graph"</button>
                     <button class="chip" class:active=move || mode.get() == Mode::Timeline on:click=move |_| mode.set(Mode::Timeline)>"Zeitleiste"</button>
+                    <button class="chip" class:active=move || mode.get() == Mode::Persons on:click=move |_| mode.set(Mode::Persons)>"Personen"</button>
                 </div>
             </nav>
-            {move || (mode.get() == Mode::Timeline).then(|| view! { <timeline::Timeline refresh=version /> })}
+            {move || (mode.get() == Mode::Timeline).then(|| view! { <timeline::Timeline refresh=version person /> })}
+            {move || (mode.get() == Mode::Persons).then(|| view! { <persons::Persons refresh=version on_saved=saved show=person /> })}
             {move || match data.get() {
-                _ if mode.get() == Mode::Timeline => ().into_any(),
+                _ if raw() => ().into_any(),
                 None => view! { <p class="muted">"Lade …"</p> }.into_any(),
                 Some(Err(e)) => view! { <p class="error">{e}</p> }.into_any(),
                 Some(Ok((nodes, edges, sensitive))) => {
@@ -85,7 +98,7 @@ fn App() -> impl IntoView {
                         .collect();
                     let body = match mode.get() {
                         Mode::Graph => view! { <graph::Graph nodes=shown edges selected /> }.into_any(),
-                        Mode::Timeline => ().into_any(),
+                        Mode::Timeline | Mode::Persons => ().into_any(),
                         Mode::List if shown.is_empty() => view! { <p class="muted">"Noch nichts festgehalten."</p> }.into_any(),
                         Mode::List => view! {
                             <section class="nodes">

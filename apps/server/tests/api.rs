@@ -664,3 +664,65 @@ async fn files_for_the_web_ui() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+/// #31: persons over HTTP: suggestion, merge, the timeline of one person, split.
+#[tokio::test]
+async fn persons_merge_and_timeline() {
+    use symbiot_core::evidence::{Actor, Evidence, role};
+    let said = |id: &str, who: &str, name: &str| Evidence {
+        id: id.into(),
+        kind: "schema:Message".into(),
+        at_ms: 10,
+        actors: vec![Actor {
+            id: who.into(),
+            role: role::FROM.into(),
+            name: name.into(),
+        }],
+        text: String::new(),
+        fields: vec![],
+        files: vec![],
+    };
+    let mut store = Store::open_in_memory(Signer::from_seed([5; 32])).unwrap();
+    store
+        .record_evidence(vec![
+            said("whatsapp:c/1", "name:Anna", "Anna"),
+            said("mail:1", "mailto:anna@example.org", "Anna"),
+            said("mail:2", "mailto:ben@example.org", "Ben"),
+        ])
+        .unwrap();
+    let app = symbiot_server::app(store, None, None);
+
+    let (_, persons) = call(&app, "GET", "/api/persons", None).await;
+    assert_eq!(persons.as_array().unwrap().len(), 3);
+    let (_, sug) = call(&app, "GET", "/api/persons/suggestions", None).await;
+    assert_eq!(sug[0]["reason"], "gleicher Name");
+
+    let merge = json!({"ids": ["name:Anna", "mailto:anna@example.org"], "name": "Anna B."});
+    let (status, _) = call(&app, "POST", "/api/persons/merge", Some(merge)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, persons) = call(&app, "GET", "/api/persons", None).await;
+    assert_eq!(persons[0]["name"], "Anna B.");
+    assert_eq!(persons[0]["identifiers"].as_array().unwrap().len(), 2);
+
+    let (_, items) = call(&app, "GET", "/api/evidence?person=name:Anna", None).await;
+    assert_eq!(
+        items.as_array().unwrap().len(),
+        2,
+        "both sources of one person"
+    );
+
+    let bad = json!({"ids": ["name:Anna"]});
+    let (status, _) = call(&app, "POST", "/api/persons/merge", Some(bad)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/api/persons/split",
+        Some(json!({"id": "name:Anna"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, items) = call(&app, "GET", "/api/evidence?person=name:Anna", None).await;
+    assert_eq!(items.as_array().unwrap().len(), 1);
+}

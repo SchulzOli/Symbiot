@@ -19,8 +19,8 @@ use symbiot_core::{
     Rule, RuleId,
 };
 use symbiot_store::{
-    ChainHead, DeviceInfo, EvidenceQuery, Origin, Sensitivity as NodeSensitivity, Store,
-    StoredEvidence, VerifyReport,
+    ChainHead, DeviceInfo, EvidenceQuery, Origin, Person, Sensitivity as NodeSensitivity, Store,
+    StoredEvidence, Suggestion, VerifyReport,
 };
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
@@ -66,6 +66,11 @@ pub fn app(store: Store, ui_dir: Option<PathBuf>, ai: Option<Arc<dyn Advisor>>) 
         .route("/edges/{id}", delete(unlink))
         .route("/evidence", get(list_evidence))
         .route("/evidence/origins", get(evidence_origins))
+        .route("/persons", get(list_persons))
+        .route("/persons/suggestions", get(person_suggestions))
+        .route("/persons/merge", post(merge_persons))
+        .route("/persons/split", post(split_person))
+        .route("/persons/apart", post(keep_apart))
         .route("/ledger", get(ledger))
         .route("/ledger/verify", get(verify))
         .route("/ledger/verify-all", get(verify_all))
@@ -118,9 +123,11 @@ async fn health() -> Json<Health> {
     })
 }
 
-/// `GET /api/evidence?q=&origin=&kind=&from=&to=&limit=&offset=` (#30). Times in ms.
+/// `GET /api/evidence?q=&origin=&kind=&from=&to=&limit=&offset=&person=` (#30, #31). Times
+/// in ms; `person` is any identifier of a person.
 #[derive(Deserialize)]
 struct EvidenceFilter {
+    person: Option<String>,
     q: Option<String>,
     origin: Option<String>,
     kind: Option<String>,
@@ -147,8 +154,73 @@ async fn list_evidence(
         to_ms: f.to,
         limit: Some(f.limit.unwrap_or(50).min(EVIDENCE_PAGE)),
         offset: f.offset,
+        actors: None,
     };
-    Ok(Json(lock(&s).evidence(&q)?))
+    let store = lock(&s);
+    let q = match blank(f.person) {
+        None => q,
+        Some(id) => EvidenceQuery {
+            actors: Some(match store.person_of(&id)? {
+                Some(p) => p.identifiers.into_iter().map(|i| i.id).collect(),
+                None => vec![id],
+            }),
+            ..q
+        },
+    };
+    Ok(Json(store.evidence(&q)?))
+}
+
+/// #31: everyone the raw data names, grouped into persons.
+async fn list_persons(State(s): State<Shared>) -> Result<Json<Vec<Person>>, ApiError> {
+    Ok(Json(lock(&s).persons()?))
+}
+
+async fn person_suggestions(State(s): State<Shared>) -> Result<Json<Vec<Suggestion>>, ApiError> {
+    Ok(Json(lock(&s).person_suggestions()?))
+}
+
+#[derive(Deserialize)]
+pub struct MergeRequest {
+    pub ids: Vec<String>,
+    #[serde(default)]
+    pub name: String,
+}
+
+/// The human decides: one person.
+async fn merge_persons(
+    State(s): State<Shared>,
+    Json(m): Json<MergeRequest>,
+) -> Result<StatusCode, ApiError> {
+    lock(&s).merge_identities(&m.ids, &m.name)?;
+    tracing::info!(ids = m.ids.len(), "identities merged");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct SplitRequest {
+    pub id: String,
+}
+
+async fn split_person(
+    State(s): State<Shared>,
+    Json(r): Json<SplitRequest>,
+) -> Result<StatusCode, ApiError> {
+    lock(&s).split_identity(&r.id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct ApartRequest {
+    pub a: String,
+    pub b: String,
+}
+
+async fn keep_apart(
+    State(s): State<Shared>,
+    Json(r): Json<ApartRequest>,
+) -> Result<StatusCode, ApiError> {
+    lock(&s).keep_apart(&r.a, &r.b)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn evidence_origins(State(s): State<Shared>) -> Result<Json<Vec<Origin>>, ApiError> {
