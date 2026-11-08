@@ -19,6 +19,7 @@ base64 = "0.22.1"
 serde = { version = "1.0.229", features = ["derive"] }
 symbiot-ai = { version = "0.3.0", path = "../../crates/symbiot-ai" }
 symbiot-core = { version = "0.3.0", path = "../../crates/symbiot-core" }
+symbiot-import = { version = "0.3.0", path = "../../crates/symbiot-import" }
 symbiot-store = { version = "0.3.0", path = "../../crates/symbiot-store" }
 symbiot-sync = { version = "0.3.0", path = "../../crates/symbiot-sync" }
 tauri = { version = "2.12.5", features = [] }

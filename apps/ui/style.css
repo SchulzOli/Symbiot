@@ -563,3 +563,7 @@ button.link {
 button.icon-btn.danger { background: transparent; color: var(--error); border-color: var(--border); }
 button.icon-btn.danger:hover { border-color: var(--error); }
 .confirm button.icon-btn.danger { background: var(--error); color: var(--surface); border-color: var(--error); }
+.import { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.import-form { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); }
+.import-form p { margin: 0; }
+.import-form input[type="file"] { max-width: 100%; }

@@ -62,3 +62,34 @@ test("Quellen: pausieren, Chat auslassen, widerrufen", async ({ page }) => {
   await page.getByRole("button", { name: "Kette prüfen" }).click();
   await expect(page.getByRole("status").first()).toContainText("ohne Inhalt");
 });
+
+test("Quellen: Export in der App importieren", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("heading", { name: "Symbiot" }).click();
+  await page.keyboard.press("5");
+  const view = page.getByTestId("sources");
+  await expect(view).toContainText("Noch keine Quellen");
+
+  await view.getByRole("button", { name: "Importieren" }).click();
+  const form = view.getByRole("form", { name: "Importieren" });
+  await axe(page, "Importieren");
+  await form.getByLabel("Datei").setInputFiles("fixtures/whatsapp-wandern.txt");
+  await form.getByLabel("Name des Chats").fill("Wandergruppe");
+  await form.getByRole("button", { name: "Laden" }).click();
+  await expect(view.getByTestId("import-result")).toHaveText("whatsapp-wandern.txt: 4 neu, 0 schon bekannt");
+  const whatsapp = view.getByTestId("source").filter({ has: page.getByRole("heading", { name: "whatsapp", exact: true }) });
+  await expect(whatsapp.getByTestId("source-used")).toHaveText("4 Belege genutzt");
+
+  // The same file again adds nothing.
+  await form.getByLabel("Datei").setInputFiles("fixtures/whatsapp-wandern.txt");
+  await form.getByRole("button", { name: "Laden" }).click();
+  await expect(view.getByTestId("import-result")).toHaveText("whatsapp-wandern.txt: 0 neu, 4 schon bekannt");
+
+  await form.getByLabel("Quelle").selectOption("mbox");
+  await form.getByLabel("Datei").setInputFiles("fixtures/anna.mbox");
+  await form.getByRole("button", { name: "Laden" }).click();
+  await expect(view.getByTestId("source")).toHaveCount(2);
+
+  await page.getByRole("button", { name: "Zeitleiste", exact: true }).click();
+  await expect(page.getByTestId("timeline").getByTestId("evidence")).toHaveCount(5);
+});

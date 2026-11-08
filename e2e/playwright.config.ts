@@ -82,7 +82,14 @@ export default defineConfig({
     {
       name: "quellen",
       testMatch: "quellen.spec.ts",
+      grep: /widerrufen/,
       use: { baseURL: "http://127.0.0.1:8117" },
+    },
+    {
+      name: "importieren",
+      testMatch: "quellen.spec.ts",
+      grep: /Export in der App/,
+      use: { baseURL: "http://127.0.0.1:8119" },
     },
     {
       name: "geraete",
@@ -105,6 +112,7 @@ export default defineConfig({
     }),
     server(8105),
     server(8113),
+    server(8119),
     server(8115, {
       SYMBIOT_AI_URL: `http://127.0.0.1:${llmPort}/v1`,
       SYMBIOT_AI_MODEL: "mock",

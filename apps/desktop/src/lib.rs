@@ -294,6 +294,60 @@ fn grant_source(
     store.with(|s| s.grant_source(&source, grant))
 }
 
+/// #44: an export chosen in the app (also on the phone). The file comes as the raw request
+/// body, the settings as headers, so large files do not go through JSON.
+#[tauri::command]
+fn import_file(
+    store: State<AppStore>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<symbiot_store::Recorded, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("Datei fehlt".into());
+    };
+    let header = |k: &str| {
+        request
+            .headers()
+            .get(k)
+            .and_then(|v| v.to_str().ok())
+            .map(decode)
+            .unwrap_or_default()
+    };
+    let source = symbiot_import::Source::parse(&header("x-source"))
+        .filter(|s| s.from_one_file())
+        .ok_or("Diese Quelle lässt sich nicht aus einer Datei laden")?;
+    let opts = symbiot_import::Options {
+        chat: Some(header("x-chat")).filter(|c| !c.is_empty()),
+        utc_offset_min: header("x-utc-offset").parse().unwrap_or(0),
+    };
+    let import = source
+        .read_bytes(&header("x-name"), bytes, &opts)
+        .map_err(|e| e.to_string())?;
+    let mut s = store.0.lock().unwrap_or_else(|p| p.into_inner());
+    symbiot_import::load(&mut s, import).map_err(|e| e.to_string())
+}
+
+/// Header values are percent-encoded by the UI (names may hold any character).
+fn decode(v: &str) -> String {
+    let b = v.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%'
+            && i + 2 < b.len()
+            && let Some(x) = std::str::from_utf8(&b[i + 1..i + 3])
+                .ok()
+                .and_then(|h| u8::from_str_radix(h, 16).ok())
+        {
+            out.push(x);
+            i += 3;
+        } else {
+            out.push(b[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 #[tauri::command]
 fn revoke_source(store: State<AppStore>, source: String) -> Result<usize, String> {
     store.with(|s| s.revoke_source(&source))
@@ -619,6 +673,7 @@ pub fn run() {
             list_sources,
             grant_source,
             revoke_source,
+            import_file,
             assist,
             decide_suggestion
         ])

@@ -87,7 +87,8 @@ pub fn app(store: Store, ui_dir: Option<PathBuf>, ai: Option<Arc<dyn Advisor>>) 
         .route("/person/revoke", post(revoke))
         .route("/files/{hash}", get(get_file))
         .route("/sync/heads", get(sync_heads))
-        .merge(sync_routes());
+        .merge(sync_routes())
+        .merge(import_routes());
 
     let state = AppState {
         store: Mutex::new(store),
@@ -118,6 +119,55 @@ fn sync_routes() -> Router<Shared> {
         .layer(DefaultBodyLimit::max(
             symbiot_store::MAX_FILE_BYTES as usize + 1024 * 1024,
         ))
+}
+
+/// The largest export the app can upload in one go (#44).
+pub const MAX_IMPORT_BYTES: usize = 512 * 1024 * 1024;
+
+fn import_routes() -> Router<Shared> {
+    Router::new()
+        .route("/import", post(import_file))
+        .layer(DefaultBodyLimit::max(MAX_IMPORT_BYTES))
+}
+
+#[derive(Deserialize)]
+pub struct ImportQuery {
+    pub source: String,
+    /// The file name; the default chat name for WhatsApp.
+    #[serde(default)]
+    pub name: String,
+    pub chat: Option<String>,
+    #[serde(default)]
+    pub utc_offset: i32,
+}
+
+/// #44: an export chosen in the app, loaded as raw data of this store.
+async fn import_file(
+    State(s): State<Shared>,
+    Query(q): Query<ImportQuery>,
+    body: Bytes,
+) -> Result<Json<symbiot_store::Recorded>, ApiError> {
+    let source = symbiot_import::Source::parse(&q.source)
+        .filter(|s| s.from_one_file())
+        .ok_or_else(|| ApiError::bad("Diese Quelle lässt sich nicht aus einer Datei laden"))?;
+    let opts = symbiot_import::Options {
+        chat: q.chat,
+        utc_offset_min: q.utc_offset,
+    };
+    let import = source
+        .read_bytes(&q.name, &body, &opts)
+        .map_err(|e| ApiError::bad(&e.to_string()))?;
+    let r = symbiot_import::load(&mut lock(&s), import).map_err(|e| match e {
+        symbiot_import::Error::Store(e) => ApiError::from(e),
+        e => ApiError::bad(&e.to_string()),
+    })?;
+    tracing::info!(
+        source = q.source,
+        added = r.added,
+        known = r.known,
+        "import"
+    );
+    Ok(Json(r))
 }
 
 async fn health() -> Json<Health> {
