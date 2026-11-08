@@ -62,6 +62,33 @@ Android-Build aus derselben Codebasis, signiertes APK im Release. iOS sobald ein
 ESP32-C3 mit `symbiot-core` signiert einen Beleg (z. B. Raumklima oder Schritte) und schickt ihn an heimserver.
 Beweis, dass „ein Gerät = eine Kette“ bis hinunter zum Mikrocontroller trägt.
 
+## Lebensgraph *(Vorschlag, E14)*
+
+Nach M6 oder parallel dazu. Die Reihenfolge folgt den Fragen aus E14: zuerst die Quellen mit den meisten
+Personen, Gesprächen und Themen.
+
+### M7 — Erinnern *(Importe und Beleg-Schicht)*
+Einmalige Importe als Adapter mit eigener Kette: Telegram-Export (JSON), WhatsApp-Chat-Export, Mail (mbox oder
+IMAP), GitHub-Historie. Blob-Speicher für Anhänge. Zeitleiste und Volltextsuche über alle Belege.
+
+> **⛳ Checkpoint M7:** Ein Jahr Telegram und GitHub ist importiert, die Kette prüft „ok“, die Suche findet eine
+> bestimmte Nachricht in unter einer Sekunde.
+
+### M8 — Wer und was *(Dinge-Schicht)*
+Personen, Gespräche, Aussagen und Themen aus den Belegen, lokal herausgezogen. Zusammenführen und Trennen als
+Einträge. Fragen in Worten, Antworten mit geprüften Quellen.
+
+> **⛳ Checkpoint M8:** „Wer hat X gut gefunden?“ und „Seit wann arbeite ich an Z?“ liefern richtige Antworten mit
+> Zitat und Link zur Originalnachricht.
+
+### M9 — Zeit *(Aktivitäten)*
+Live-Adapter für Web-Verlauf, Steam und Android (App-Nutzung, Standort, setzt M5 voraus), dazu Fotos und
+Screenshots mit OCR. Kategorien als angenommene Regeln. Ansicht „Wie verbringe ich meine Zeit“.
+
+### M10 — Gespräche *(Angesicht zu Angesicht)*
+Sprachnotizen und Aufnahmen mit Einwilligung, lokal mit Whisper transkribiert. Vorschläge „Warst du mit Anna
+zusammen?“ aus Kalender, Standort und Fotos.
+
 ## Arbeitsweise
 
 - **Trunk-based:** kurze Branches, Pull Request mit grüner CI, Squash-Merge nach `main`.

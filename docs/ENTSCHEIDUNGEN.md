@@ -1,6 +1,6 @@
 # Entscheidungen
 
-Stand: 2026-10-31. Jede Entscheidung hat einen Status: **entschieden** (vom Besitzer), **Vorschlag** (wartet auf
+Stand: 2026-11-08. Jede Entscheidung hat einen Status: **entschieden** (vom Besitzer), **Vorschlag** (wartet auf
 den Besitzer) oder **offen**. Was hier entschieden ist, gilt vor PLAN.md und FEATURES.md, bis diese nachgezogen sind.
 
 ## E1 — Symbiot und Connect sind ein System · *entschieden*
@@ -136,6 +136,7 @@ Matrix lesend, dazu ein MCP-Server von Symbiot (nur lesen und vorschlagen).
 - **„Diesem Adapter vertrauen“:** Der Mensch kann einen Adapter als vertraut markieren. Dann werden seine
   Belege ohne Klick zu Knoten. Das ist ein Teil der Freigabe (`Grant`) in der Kette, jederzeit widerrufbar,
   und jeder so entstandene Knoten zeigt, dass er über das Vertrauen entstanden ist.
+  Bei großen Mengen schlägt E14 vor, dass Vertrauen nur in die Beleg- und Dinge-Schicht schreibt.
 - **Abgrenzung (entschieden 2026-10-31):** Vertrauen gilt nur für das Anlegen von Knoten. Handlungen nach außen (Mail
   senden, Licht schalten) bleiben immer ein Klick, und Belege, die eine Sensibilitäts-Regel (E4) treffen,
   ebenso.
@@ -178,9 +179,122 @@ Witness, Bündel, Retention, Grant/Revoke, Geräte reserviert). **Keine Migratio
 eine v1-Datenbank wird beim Start als `symbiot.v1.db` beiseitegelegt. Noch offen: Checkpoint und Witness (M4),
 Bündel, `SetRetention`, Rollup und „Aufgeräumt“ (mit dem ersten Adapter).
 
+## E14 — Lebensgraph in Schichten · *Vorschlag (2026-11-08)*
+
+Symbiot soll ein Graph des eigenen Lebens werden und so viele Daten wie möglich verarbeiten. Ziel und Quellen hat
+Der Besitzer hat am 2026-11-08 festgelegt. Die Schichten, Knotenarten und die Reihenfolge sind ein Vorschlag.
+
+**Fragen, die Symbiot beantworten soll** (festgelegt):
+- Was habe ich mit wem gemacht?
+- Wer hat X gut gefunden?
+- Worauf bezieht sich Person Y aus unserem letzten Gespräch?
+- Wann habe ich angefangen, mit Thema Z zu arbeiten?
+- Wie verbringe ich meine Zeit?
+
+**Quellen** (festgelegt): GitHub, E-Mail, WhatsApp, Telegram, Web-Verlauf, Fotos und Screenshots, Steam, das
+Android-Smartphone und Gespräche von Angesicht zu Angesicht. Alles soll möglich und aufbereitbar sein.
+
+### Das Problem
+
+Mit E10 wird jeder Beleg eines vertrauten Adapters ein eigener Knoten. Bei Zehntausenden Mails, Nachrichten,
+Fotos und Verlaufseinträgen wäre der Graph unbrauchbar. Ohne Vertrauen wären es Zehntausende Klicks.
+
+### Drei Schichten, eine Wahrheit
+
+Alle Schichten sind **Projektionen derselben Ketten**. Es gibt keine zweite Datenbank, die auseinanderlaufen
+kann. Jede Schicht lässt sich aus den Ketten neu aufbauen.
+
+| Schicht | Inhalt | Wer schreibt | Menge |
+|---|---|---|---|
+| **1. Belege** (Zeitleiste) | Rohdaten: Nachrichten, Mails, Commits, Fotos, besuchte Seiten, Spielzeiten, App-Nutzung, Transkripte | Adapter, automatisch (gebündelt nach E13) | Millionen |
+| **2. Dinge** (Entitäten) | Personen, Themen, Orte, Gespräche, Aussagen, Aktivitäten | KI und Regeln, nachvollziehbar und widerrufbar | Tausende |
+| **3. Bedeutung** (heutiger Graph) | Ziele, Beziehungen, Entscheidungen, Erkenntnisse | nur der Mensch, Vorschläge mit Quellen aus 1 und 2 | Hunderte |
+
+Dazu kommen **Indizes**, keine weiteren Graphen: Volltext (SQLite FTS5), Embeddings für „finde Ähnliches“
+(z. B. `sqlite-vec`), Zeit und Ort. Auch sie sind jederzeit neu baubar.
+
+### Knotenarten in Schicht 2
+
+| Art | Beispiel | Beantwortet |
+|---|---|---|
+| **Person** | Anna, zusammengeführt aus WhatsApp, Telegram, Mail und GitHub | alle Fragen |
+| **Gespräch** | Chat-Verlauf eines Tages, Mail-Thread, Treffen von Angesicht zu Angesicht | „worauf bezieht sich Y“ |
+| **Aussage** | Person · Thema · Haltung · **wörtliches Zitat** · Verweis auf den Beleg | „wer fand X gut“ |
+| **Thema** | „Rust“, „Symbiot“, „Umzug“; erkannt über Embeddings, mit frühestem Beleg | „seit wann Z“ |
+| **Ort** | aus Foto-Metadaten und Standort | „was mit wem“ |
+| **Aktivität** | Zeitabschnitt mit Art: spielen, programmieren, lesen, schreiben, unterwegs | „wie verbringe ich meine Zeit“ |
+
+Jeder Knoten in Schicht 2 verweist auf die Belege, aus denen er entstand. Eine Antwort der KI nennt diese Belege,
+und Symbiot prüft, dass sie existieren (wie in M3). Eine Aussage ohne Zitat gibt es nicht.
+
+**Zusammenführen ist das Kernproblem.** „Anna“ in WhatsApp, „anna.m@…“ in Mail und „@annam“ auf GitHub sind eine
+Person. Zusammenführungen sind Einträge (`Merge`, `Split`), damit jede rückgängig gemacht werden kann. Eindeutige
+Fälle (gleiche Telefonnummer, gleiche Mail-Adresse) führen Regeln zusammen. Unsichere Fälle schlägt die KI vor,
+der Mensch nimmt an.
+
+**Kategorien für die Zeit** („Steam = spielen“, „github.com = programmieren“) sind Regeln wie in E4: von der KI
+vorgeschlagen, vom Menschen angenommen, danach deterministisch angewandt.
+
+### Quellen und wie sie hereinkommen
+
+Zuerst die **Vergangenheit über Exporte** (Jahre auf einmal, keine API-Pflege), danach **live**.
+
+| Quelle | Vergangenheit | Live | Liefert vor allem |
+|---|---|---|---|
+| **GitHub** | REST/GraphQL-API, vollständige Historie | dieselbe API, regelmäßig abfragen | Themen, Aktivität, Personen |
+| **E-Mail** | mbox (Google Takeout) oder IMAP komplett | IMAP IDLE, später JMAP | Personen, Gespräche, Aussagen |
+| **WhatsApp** | Chat-Export pro Chat (Text und Medien) | keine offizielle API. Möglich: Bridge `mautrix-whatsapp` über Matrix (E7) | Personen, Gespräche, Aussagen |
+| **Telegram** | Export aus Telegram Desktop (JSON, vollständig) | eigenes Konto über MTProto (z. B. `grammers` in Rust) oder Bridge über Matrix | Personen, Gespräche, Aussagen |
+| **Web-Verlauf** | Verlaufsdatenbank des Browsers (Chrome `History`, Firefox `places.sqlite`), Takeout | Browser-Erweiterung oder Datenbank regelmäßig lesen | Themen, Aktivität |
+| **Fotos und Screenshots** | Ordner vom Handy (DCIM, Screenshots) | Ordner-Abgleich (z. B. Syncthing) oder Android-App | Orte, Personen (Gesichter), Text in Screenshots (OCR) |
+| **Steam** | Web-API: Spielzeit pro Spiel (nur Summen) | Status regelmäßig abfragen, daraus Spiel-Sitzungen | Aktivität |
+| **Android** | Takeout, Standort-Zeitachse (Export vom Gerät) | Symbiot-App als Adapter (M5): App-Nutzung (`UsageStatsManager`), Anrufe, Standort, Health Connect | Aktivität, Orte, Personen |
+| **Angesicht zu Angesicht** | – | Sprachnotiz oder Aufnahme, lokal transkribiert (Whisper) mit Sprechertrennung | Gespräche, Aussagen |
+
+**Große Dateien** (Fotos, Audio, Anhänge) liegen in einem Blob-Speicher, adressiert über ihren Inhalts-Hash. In
+der Kette steht nur der Hash. Löschen (E2) räumt auch den Blob weg.
+
+### Gespräche von Angesicht zu Angesicht
+
+Drei Wege, vom einfachsten zum vollständigsten:
+1. **Nachträgliche Sprachnotiz:** „Habe mit Anna über den Umzug gesprochen, sie findet …“. Eigene Worte, keine
+   Einwilligung nötig.
+2. **Vorschlag aus anderen Daten:** Kalender, Standort und Fotos zeigen ein Treffen. Symbiot fragt: „Warst du am
+   Samstag mit Anna zusammen? Worüber habt ihr gesprochen?“
+3. **Aufnahme des Gesprächs:** nur mit **Einwilligung aller Beteiligten.** Wer in Deutschland das nichtöffentlich
+   gesprochene Wort ohne Einwilligung aufnimmt, macht sich strafbar (§ 201 StGB). Die Einwilligung ist ein Eintrag
+   in der Kette, mit Person und Zeitpunkt. Ohne diesen Eintrag nimmt die App nicht auf.
+
+### Verarbeitung
+
+- **Lokal.** Herausziehen von Personen, Aussagen und Themen, Transkription, Gesichter und OCR laufen auf heimserver oder
+  dem Gerät. Die Menge und die Sensibilität der Daten lassen nichts anderes zu. Claude bekommt weiter nur
+  Maskiertes (E4, E12).
+- **Texte von außen bleiben Daten** (E12). Eine Nachricht von Anna ist Quelle, nie Auftrag an die KI.
+- **Daten Dritter.** Nachrichten und Fotos enthalten andere Menschen. Sie bleiben lokal, sind nicht exportierbar
+  voreingestellt und verlassen nie das Heimnetz. Teilen mit anderen (Phase WIR) braucht eine eigene Entscheidung.
+
+### Folgen für bestehende Entscheidungen (bei Annahme)
+
+- **E8:** Neue Knotenarten sind für Schicht 2 erlaubt (Person, Gespräch, Aussage, Thema, Ort, Aktivität). Für
+  Schicht 3 bleibt E8 bestehen.
+- **E10:** Ein vertrauter Adapter schreibt automatisch in Schicht 1, und Regeln leiten daraus Schicht 2 ab. In
+  Schicht 3 entsteht ein Knoten weiter nur durch den Klick des Menschen.
+- **PLAN:** Home Assistant rückt nach hinten. Für die Fragen oben bringen Nachrichten, Mail und GitHub mehr.
+
+### Offen
+
+- **Leistung von heimserver:** Reichen CPU, GPU und Speicher für Whisper, Embeddings, OCR und Gesichter über Jahre an
+  Daten? Ist `qwen3:8b` gut genug, um Aussagen zuverlässig herauszuziehen?
+- **Welcher Browser** auf PC und Handy?
+- **Wo liegen die Fotos heute** (Google Fotos, nur Handy, eigener Server)?
+- **WhatsApp live:** Ist eine Bridge über Matrix gewollt? Sie läuft über ein zweites verknüpftes Gerät und kann
+  gegen die Nutzungsbedingungen von WhatsApp verstoßen.
+
 ## E8 — Zurückgestellt · *entschieden*
 
-- **Neue Knotenarten** wie „Absicht“ oder „Gegenseite“: erst einmal nicht.
+- **Neue Knotenarten** wie „Absicht“ oder „Gegenseite“: erst einmal nicht. Für die Dinge-Schicht schlägt E14
+  eigene Knotenarten vor.
 - **iOS:** später.
 
 ## E9 — KI für M3 · *entschieden*
