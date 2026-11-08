@@ -16,7 +16,10 @@ use symbiot_core::{
     Edge, EdgeId, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal, PubKey, Rule,
     RuleId,
 };
-use symbiot_store::{ChainHead, DeviceInfo, Sensitivity as NodeSensitivity, Store, VerifyReport};
+use symbiot_store::{
+    ChainHead, DeviceInfo, EvidenceQuery, Origin, Sensitivity as NodeSensitivity, Store,
+    StoredEvidence, VerifyReport,
+};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
@@ -59,6 +62,8 @@ pub fn app(store: Store, ui_dir: Option<PathBuf>, ai: Option<Arc<dyn Advisor>>) 
         .route("/ai", get(ai_info))
         .route("/edges", get(list_edges).post(create_edge))
         .route("/edges/{id}", delete(unlink))
+        .route("/evidence", get(list_evidence))
+        .route("/evidence/origins", get(evidence_origins))
         .route("/ledger", get(ledger))
         .route("/ledger/verify", get(verify))
         .route("/ledger/verify-all", get(verify_all))
@@ -96,6 +101,43 @@ async fn health() -> Json<Health> {
         core: symbiot_core::VERSION,
         protocol: symbiot_core::PROTOCOL_VERSION,
     })
+}
+
+/// `GET /api/evidence?q=&origin=&kind=&from=&to=&limit=&offset=` (#30). Times in ms.
+#[derive(Deserialize)]
+struct EvidenceFilter {
+    q: Option<String>,
+    origin: Option<String>,
+    kind: Option<String>,
+    from: Option<u64>,
+    to: Option<u64>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+}
+
+/// At most this many items per request.
+const EVIDENCE_PAGE: usize = 200;
+
+/// Raw data (E14), newest first. Like everything here it stays in the tailnet.
+async fn list_evidence(
+    State(s): State<Shared>,
+    Query(f): Query<EvidenceFilter>,
+) -> Result<Json<Vec<StoredEvidence>>, ApiError> {
+    let blank = |v: Option<String>| v.filter(|x| !x.trim().is_empty());
+    let q = EvidenceQuery {
+        text: blank(f.q),
+        origin: blank(f.origin),
+        kind: blank(f.kind),
+        from_ms: f.from,
+        to_ms: f.to,
+        limit: Some(f.limit.unwrap_or(50).min(EVIDENCE_PAGE)),
+        offset: f.offset,
+    };
+    Ok(Json(lock(&s).evidence(&q)?))
+}
+
+async fn evidence_origins(State(s): State<Shared>) -> Result<Json<Vec<Origin>>, ApiError> {
+    Ok(Json(lock(&s).evidence_origins()?))
 }
 
 #[derive(Deserialize)]

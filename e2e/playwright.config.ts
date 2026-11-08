@@ -26,6 +26,23 @@ function server(port: number, env: Record<string, string> = {}) {
   };
 }
 
+// #30: a server whose store already holds raw data, loaded with the import tool before it starts.
+function serverWithImports(port: number) {
+  const base = server(port);
+  const data = base.env.SYMBIOT_DATA;
+  const fixtures = join(root, "e2e", "fixtures");
+  const imp = (source: string, file: string, extra = "") =>
+    `cargo run --release -q -p symbiot-import -- ${source} "${join(fixtures, file)}" --daten "${data}" ${extra}`;
+  return {
+    ...base,
+    command: [
+      imp("whatsapp", "whatsapp-wandern.txt", "--chat Wandergruppe --utc-offset 60"),
+      imp("mbox", "rechnung.mbox"),
+      base.command,
+    ].join(" && "),
+  };
+}
+
 export default defineConfig({
   testDir: "tests",
   timeout: 30_000,
@@ -49,6 +66,11 @@ export default defineConfig({
       use: { baseURL: "http://127.0.0.1:8107" },
     },
     {
+      name: "zeitleiste",
+      testMatch: "zeitleiste.spec.ts",
+      use: { baseURL: "http://127.0.0.1:8109" },
+    },
+    {
       name: "geraete",
       testMatch: "geraete.spec.ts",
       use: { baseURL: "http://127.0.0.1:8105" },
@@ -68,6 +90,7 @@ export default defineConfig({
       SYMBIOT_AI_MODEL: "mock",
     }),
     server(8105),
+    serverWithImports(8109),
     server(8107, {
       SYMBIOT_AI_URL: `http://127.0.0.1:${llmPort}/v1`,
       SYMBIOT_AI_MODEL: "mock",

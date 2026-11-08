@@ -19,12 +19,13 @@ use symbiot_core::{
 /// 3: nodes carry `concurrent` (M4); the projection is rebuilt from the ledger on upgrade.
 /// 4: rules for what is sensitive and marks by hand (E4); `sensitive` holds the result.
 /// 5: raw data (E14) in `evidence`.
-const SCHEMA_VERSION: i64 = 5;
+/// 6: `evidence` knows its origin, `evidence_fts` indexes the words (#30); rebuilt from the ledger.
+const SCHEMA_VERSION: i64 = 6;
 
 mod evidence;
 mod sync;
 
-pub use evidence::{EvidenceQuery, Recorded, StoredEvidence};
+pub use evidence::{EvidenceQuery, Origin, Recorded, StoredEvidence};
 
 pub use symbiot_core::VerifyReport;
 pub use sync::{ChainHead, DeviceInfo, new_words};
@@ -200,6 +201,9 @@ impl Store {
                  PRIMARY KEY (author, seq, hash)
              );",
         )?;
+        if version > 0 && version < 6 {
+            conn.execute_batch(evidence::DROP)?;
+        }
         conn.execute_batch(evidence::SCHEMA)?;
         if version > 0 && version < SCHEMA_VERSION {
             // Only the projection changed shape; the ledger is the truth.

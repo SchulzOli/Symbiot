@@ -246,3 +246,28 @@ button.danger-link { color: var(--error); }
 .rules > p { margin: 0; }
 .rule-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 .own-rule input[type="text"] { min-width: 140px; }
+
+/* #30: raw data timeline */
+.timeline { display: grid; gap: 12px; }
+.timeline form input { flex: 1 1 220px; min-width: 0; }
+.origins { gap: 6px; }
+.evidence-list { display: grid; gap: 8px; }
+.evidence-list .day {
+  margin: 12px 0 0; font-size: 0.85rem; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--muted);
+}
+.evidence {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; overflow-wrap: anywhere;
+}
+.evidence .row { gap: 8px; }
+.evidence .time { font-variant-numeric: tabular-nums; color: var(--muted); }
+.evidence .origin {
+  font-size: 0.75rem; padding: 1px 8px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--muted);
+}
+.evidence .text { margin: 6px 0 0; white-space: pre-wrap; }
+button.link {
+  background: none; border: none; padding: 0; color: var(--accent);
+  cursor: pointer; font: inherit; font-size: 0.9rem;
+}

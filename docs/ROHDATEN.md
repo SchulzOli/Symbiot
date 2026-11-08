@@ -84,8 +84,17 @@ symbiot-import git ~/code/symbiot
 - Anhänge stehen vorerst nur mit Namen in den Feldern (`attachment`). Die Dateien selbst kommen mit dem
   Datei-Speicher (#28).
 
+## Ansehen und suchen
+
+In der App zeigt der Reiter **Zeitleiste** die Rohdaten nach Tagen, die neuesten zuerst. Die Suche findet Wörter
+im Text, in Namen und Kennungen der Personen und in den Feldern (Betreff, Chat, Repository). Jedes Wort muss
+vorkommen, Wortanfänge genügen. Die Filter-Knöpfe beschränken die Liste auf eine Herkunft.
+
+- Server: `GET /api/evidence?q=&origin=&kind=&from=&to=&limit=&offset=` und `GET /api/evidence/origins`
+- Speicher: `evidence_fts` (SQLite FTS5, ohne eigene Kopie des Texts), Schema 6
+
 ## Noch nicht enthalten
 
 - Einzelne Belege löschen (das Entfernen eines Teils statt des ganzen Bündels). Kommt mit „Aufgeräumt“ (E13).
 - Freigabe pro Adapter (`Grant`, E7, E10). Bis dahin gilt: Ein Adapter ist ein bestätigtes Gerät der Person.
-- Volltextsuche und Zeitleiste (#30), Datei-Speicher (#28), Live-Adapter (M9).
+- Datei-Speicher (#28), Live-Adapter (M9).

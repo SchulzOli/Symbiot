@@ -4,8 +4,8 @@
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use symbiot_core::{
-    Edge, EdgeId, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal, PubKey, Rule,
-    RuleId, VerifyReport,
+    Edge, EdgeId, EdgeKind, Evidence, Hash, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal,
+    PubKey, Rule, RuleId, VerifyReport,
 };
 use wasm_bindgen::{JsCast, JsValue};
 
@@ -317,6 +317,70 @@ pub struct Sensitivity {
     pub sensitive: bool,
     pub by_hand: Option<bool>,
     pub rules: Vec<String>,
+}
+
+/// #30: one piece of raw data (E14) as the store returns it.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct StoredEvidence {
+    pub key: Hash,
+    pub entry: Hash,
+    pub author: PubKey,
+    pub evidence: Evidence,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct Origin {
+    pub origin: String,
+    pub count: usize,
+}
+
+/// Which raw data to load; empty fields do not filter.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct EvidenceFilter {
+    pub q: Option<String>,
+    pub origin: Option<String>,
+    pub limit: Option<usize>,
+    pub offset: Option<usize>,
+}
+
+pub async fn list_evidence(filter: EvidenceFilter) -> ApiResult<Vec<StoredEvidence>> {
+    #[derive(Serialize)]
+    struct Args {
+        filter: EvidenceFilter,
+    }
+    if tauri_invoke_fn().is_some() {
+        return invoke("list_evidence", &Args { filter }).await;
+    }
+    let mut params = Vec::new();
+    let mut add = |key: &str, value: String| {
+        params.push(format!(
+            "{key}={}",
+            String::from(js_sys::encode_uri_component(&value))
+        ))
+    };
+    if let Some(q) = filter.q {
+        add("q", q);
+    }
+    if let Some(o) = filter.origin {
+        add("origin", o);
+    }
+    if let Some(l) = filter.limit {
+        add("limit", l.to_string());
+    }
+    if let Some(o) = filter.offset {
+        add("offset", o.to_string());
+    }
+    let url = format!("/api/evidence?{}", params.join("&"));
+    http_json(gloo_net::http::Request::get(&url).build()).await
+}
+
+pub async fn evidence_origins() -> ApiResult<Vec<Origin>> {
+    #[derive(Serialize)]
+    struct NoArgs {}
+    if tauri_invoke_fn().is_some() {
+        return invoke("evidence_origins", &NoArgs {}).await;
+    }
+    http_json(gloo_net::http::Request::get("/api/evidence/origins").build()).await
 }
 
 pub async fn list_rules() -> ApiResult<Vec<Rule>> {

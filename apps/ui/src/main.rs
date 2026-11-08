@@ -5,6 +5,7 @@ mod detail;
 mod devices;
 mod graph;
 mod rules;
+mod timeline;
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -20,6 +21,8 @@ fn main() {
 enum Mode {
     List,
     Graph,
+    /// #30: raw data (E14), not the graph.
+    Timeline,
 }
 
 async fn load() -> Result<(Vec<Node>, Vec<Edge>, Vec<NodeId>), String> {
@@ -58,13 +61,16 @@ fn App() -> impl IntoView {
             {move || (set_up() == Some(false)).then(|| view! { <devices::Devices refresh=version on_saved=saved /> })}
             <Capture on_saved=saved />
             <nav class="row between">
-                <Filter filter />
+                {move || (mode.get() != Mode::Timeline).then(|| view! { <Filter filter /> })}
                 <div class="tabs">
                     <button class="chip" class:active=move || mode.get() == Mode::List on:click=move |_| mode.set(Mode::List)>"Liste"</button>
                     <button class="chip" class:active=move || mode.get() == Mode::Graph on:click=move |_| mode.set(Mode::Graph)>"Graph"</button>
+                    <button class="chip" class:active=move || mode.get() == Mode::Timeline on:click=move |_| mode.set(Mode::Timeline)>"Zeitleiste"</button>
                 </div>
             </nav>
+            {move || (mode.get() == Mode::Timeline).then(|| view! { <timeline::Timeline refresh=version /> })}
             {move || match data.get() {
+                _ if mode.get() == Mode::Timeline => ().into_any(),
                 None => view! { <p class="muted">"Lade …"</p> }.into_any(),
                 Some(Err(e)) => view! { <p class="error">{e}</p> }.into_any(),
                 Some(Ok((nodes, edges, sensitive))) => {
@@ -79,6 +85,7 @@ fn App() -> impl IntoView {
                         .collect();
                     let body = match mode.get() {
                         Mode::Graph => view! { <graph::Graph nodes=shown edges selected /> }.into_any(),
+                        Mode::Timeline => ().into_any(),
                         Mode::List if shown.is_empty() => view! { <p class="muted">"Noch nichts festgehalten."</p> }.into_any(),
                         Mode::List => view! {
                             <section class="nodes">

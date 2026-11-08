@@ -551,3 +551,44 @@ async fn sensitivity_rules_from_the_ai() {
     assert_eq!(s, StatusCode::BAD_REQUEST);
     assert!(err["error"].as_str().unwrap().contains("Stichwörter"));
 }
+
+/// #30: raw data can be listed and searched over HTTP.
+#[tokio::test]
+async fn evidence_search_and_origins() {
+    use symbiot_core::evidence::{Actor, Evidence, role};
+    let mut store = Store::open_in_memory(Signer::from_seed([5; 32])).unwrap();
+    let msg = |n: u64, text: &str| Evidence {
+        id: format!("telegram:1/{n}"),
+        kind: "schema:Message".into(),
+        at_ms: 1_000 + n,
+        actors: vec![Actor {
+            id: "telegram:anna".into(),
+            role: role::FROM.into(),
+            name: "Anna".into(),
+        }],
+        text: text.into(),
+        fields: vec![],
+        files: vec![],
+    };
+    store
+        .record_evidence(vec![msg(1, "Wandern am Samstag?"), msg(2, "Gerne!")])
+        .unwrap();
+    let app = symbiot_server::app(store, None, None);
+
+    let (status, all) = call(&app, "GET", "/api/evidence", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(all.as_array().unwrap().len(), 2);
+    assert_eq!(all[0]["evidence"]["text"], "Gerne!");
+    assert_eq!(all[0]["evidence"]["actors"][0]["name"], "Anna");
+
+    let (_, found) = call(&app, "GET", "/api/evidence?q=wand&origin=telegram", None).await;
+    assert_eq!(found.as_array().unwrap().len(), 1);
+    assert_eq!(found[0]["evidence"]["id"], "telegram:1/1");
+    let (_, none) = call(&app, "GET", "/api/evidence?origin=mail", None).await;
+    assert_eq!(none.as_array().unwrap().len(), 0);
+    let (_, page) = call(&app, "GET", "/api/evidence?limit=1&offset=1", None).await;
+    assert_eq!(page[0]["evidence"]["text"], "Wandern am Samstag?");
+
+    let (_, origins) = call(&app, "GET", "/api/evidence/origins", None).await;
+    assert_eq!(origins, json!([{"origin": "telegram", "count": 2}]));
+}
