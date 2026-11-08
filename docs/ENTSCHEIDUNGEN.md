@@ -179,7 +179,7 @@ Witness, Bündel, Retention, Grant/Revoke, Geräte reserviert). **Keine Migratio
 eine v1-Datenbank wird beim Start als `symbiot.v1.db` beiseitegelegt. Noch offen: Checkpoint und Witness (M4),
 Bündel, `SetRetention`, Rollup und „Aufgeräumt“ (mit dem ersten Adapter).
 
-## E14 — Lebensgraph: Integration und Aufbereitung als ETL-Pipeline · *Vorschlag (2026-11-08)*
+## E14 — Lebensgraph: Integration und Aufbereitung als ETL-Pipeline · *Vorschlag (2026-11-08), Speicher entschieden*
 
 Symbiot soll ein Graph des eigenen Lebens werden und so viele Daten wie möglich verarbeiten. Dafür gibt es zwei
 getrennte Schichten: eine **Integrationsschicht**, die nur Daten hereinholt, und eine **Aufbereitungsschicht**,
@@ -281,7 +281,7 @@ nicht. Ein neuer Adapter braucht keine neue Aufbereitung, und eine neue Aufberei
 
 Fragen in Worten beantwortet die KI wie in M3: mit Quellen, deren Existenz Symbiot prüft.
 
-### Speicher: reicht SQLite?
+### Speicher: reicht SQLite? · *entschieden (2026-11-08)*
 
 Ein ganzes Leben in Daten ist grob geschätzt: Nachrichten und Mails einige Millionen, Web-Verlauf einige Millionen,
 Fotos Hunderttausende (Metadaten klein, Dateien groß), Standort- und Gesundheitswerte zig Millionen pro Jahr. Das
@@ -335,7 +335,6 @@ Drei Wege, vom einfachsten zum vollständigsten:
   Aktivität). Für die Bedeutung bleibt E8 bestehen.
 - **E10:** Ein vertrauter Adapter lädt Rohdaten ohne Klick, Aufbereiter leiten daraus Dinge ab. In der Bedeutung
   entsteht ein Knoten weiter nur durch den Klick des Menschen.
-- **TECH-STACK:** SQLite bleibt, dazu Parquet und DuckDB, Datei-Speicher, Such-Indizes.
 - **PLAN:** Für die Beispiel-Fragen bringen Nachrichten, Mail und Git mehr als Smart Home.
 
 ### Offen

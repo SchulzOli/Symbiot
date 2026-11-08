@@ -19,6 +19,7 @@ Stand: 2026-10-30 · ersetzt die Supabase-Entscheidung vom 2026-08-09 (`TrustInA
 | Kanonische Bytes | `serde` + `postcard` | deterministisch und `no_std`, damit Hashes überall gleich sind |
 | IDs | `uuid` v7 | zeitlich sortierbar, ohne Koordination |
 | Speicher | **SQLite** über `rusqlite` (`bundled`) | läuft auf Desktop, Android, iOS und Server ohne Installation |
+| Massendaten (E14) | **Parquet + DuckDB**, Datei-Speicher nach Inhalts-Hash, Volltext mit FTS5 (später Tantivy), Ähnlichkeit mit `sqlite-vec` (später LanceDB) | alles eingebettet. Nur Ketten und Dateien sind Wahrheit, der Rest lässt sich neu bauen |
 | UI | **Leptos** (CSR → WASM) | UI in Rust, teilt die Typen direkt mit dem Kern, kein TS-Zwilling |
 | App-Hülle | **Tauri 2** | ein Projekt für Windows, macOS, Linux, Android und iOS. Mit Updater, Signierung und fertiger GitHub Action |
 | Server | **axum** + `tokio` | Sync-API, liefert dieselbe UI als Web-App aus, KI-Proxy |

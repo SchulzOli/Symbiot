@@ -51,7 +51,11 @@ Die Geräte gleichen über den Heimserver ab. Auf dem Heimserver selbst ist nich
    eingeben“ und einen Namen vergeben, dann bei „Adresse des Heimservers“ `https://heimserver.example.ts.net:8449` eintragen
    und speichern. Die App merkt sich die Adresse (`sync-url.txt` im Datenordner) und gleicht jede Minute ab,
    oder mit „Jetzt abgleichen“. `SYMBIOT_SYNC_URL` gilt nur, solange in der App keine Adresse gespeichert ist.
-3. **Verlorenes Gerät:** auf einem anderen Gerät unter „Geräte“ widerrufen (braucht die Wörter).
+3. **Datenordner der Desktop-App:** Er heißt nach der App-Kennung `io.github.schulzoli.symbiot`, unter Windows
+   `%APPDATA%\io.github.schulzoli.symbiot`. Bis v0.3.0 hatte die App eine andere Kennung. Wer sie schon benutzt hat,
+   verschiebt den alten Ordner (mit `symbiot.db`, `device.key`, `sync-url.txt`) vor dem ersten Start unter den
+   neuen Namen. Sonst startet die App leer, und das Gerät braucht einen neuen Schlüssel.
+4. **Verlorenes Gerät:** auf einem anderen Gerät unter „Geräte“ widerrufen (braucht die Wörter).
 
 Im Log stehen nur Metadaten (Gerät, Anzahl Einträge), nie Wörter oder Inhalte. Eine Verzweigung (ein
 Geräteschlüssel schreibt zwei Geschichten) wird mit Level `ERROR` geloggt.
