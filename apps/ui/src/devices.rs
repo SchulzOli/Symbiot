@@ -2,6 +2,8 @@
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+
+use crate::icons::{Icon, Svg};
 use symbiot_core::PubKey;
 
 use crate::api::{self, DeviceInfo, PersonInfo};
@@ -297,14 +299,14 @@ fn SyncState(on_saved: impl Fn() + Copy + Send + Sync + 'static) -> impl IntoVie
                             aria-label="Adresse des Heimservers"
                         />
                     </label>
-                    <button type="submit" class="chip" disabled=move || busy.get()>"Speichern"</button>
+                    <button type="submit" class="icon-btn primary" aria-label="Adresse speichern" data-tip="Adresse speichern" disabled=move || busy.get()><Svg icon=Icon::Save /></button>
                 </form>
                 {match s.url {
                     Some(_) => view! {
                         <div class="sync row">
                             <span class="muted">{describe(&s)}</span>
                             {s.last_error.clone().map(|e| view! { <span class="error">{e}</span> })}
-                            <button class="chip" on:click=sync disabled=move || busy.get()>"Jetzt abgleichen"</button>
+                            <button class="icon-btn" aria-label="Jetzt abgleichen" data-tip="Jetzt abgleichen" on:click=sync disabled=move || busy.get()><Svg icon=Icon::Sync /></button>
                         </div>
                     }
                     .into_any(),
