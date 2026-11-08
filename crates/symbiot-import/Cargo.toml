@@ -1,0 +1,27 @@
+[package]
+name = "symbiot-import"
+description = "Import-Adapter (E14): Telegram, WhatsApp, mbox, Git"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "symbiot-import"
+path = "src/main.rs"
+
+[dependencies]
+hex = "0.4.3"
+mail-parser = "1.0.1"
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+symbiot-core = { version = "0.3.0", path = "../symbiot-core" }
+symbiot-store = { version = "0.3.0", path = "../symbiot-store" }
+symbiot-sync = { version = "0.3.0", path = "../symbiot-sync" }
+thiserror = "2.0.21"
+
+[dev-dependencies]
+axum = "0.8.9"
+symbiot-server = { version = "0.3.0", path = "../../apps/server" }
+tempfile = "3.27.0"
+tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "net"] }

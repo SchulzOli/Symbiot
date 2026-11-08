@@ -25,6 +25,7 @@ Hervorgegangen aus dem Ideengarten *TrustInAI*. Benannt nach der *Symbiose Mensc
 | `crates/symbiot-core` | `no_std`-Kern: Knoten, signierte Hash-Kette (Kopf + entfernbarer Inhalt), Prüfung, Projektion, Rohdaten-Format (E14) |
 | `crates/symbiot-store` | SQLite: Kette als Wahrheit, Knoten und Rohdaten als Projektion, Geräteschlüssel |
 | `crates/symbiot-sync` | Abgleich (M4): signierte Anfragen, Client, der die eigene Kette sendet und fehlende holt |
+| `crates/symbiot-import` | Import-Adapter (E14): Telegram, WhatsApp, mbox, Git. Werkzeug `symbiot-import`, siehe [ROHDATEN.md](docs/ROHDATEN.md#importieren-symbiot-import) |
 | `crates/symbiot-ai` | „Nächsten Schritt vorschlagen“: Kontext, Anfrage an LiteLLM, Prüfung der Quellen. Schreibt nie |
 | `apps/ui` | Leptos-Oberfläche, im Browser über `/api`, in Tauri über `invoke` |
 | `apps/desktop` | Tauri 2: Windows, macOS, Linux (später Android, iOS), Daten lokal |

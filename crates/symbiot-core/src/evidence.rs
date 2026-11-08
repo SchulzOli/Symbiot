@@ -69,6 +69,9 @@ pub struct Actor {
     pub id: String,
     /// See [`role`].
     pub role: String,
+    /// The name the source shows next to the id (e.g. the display name of a mail address).
+    /// Empty if the source has none.
+    pub name: String,
 }
 
 /// A file that belongs to a piece of evidence.
@@ -189,6 +192,7 @@ pub(crate) fn sample(id: &str, at_ms: u64, text: &str) -> Evidence {
         actors: alloc::vec![Actor {
             id: "name:Anna".into(),
             role: role::FROM.into(),
+            name: "Anna".into(),
         }],
         text: text.into(),
         fields: alloc::vec![("thread".into(), "1".into())],

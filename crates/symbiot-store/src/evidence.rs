@@ -228,6 +228,7 @@ mod tests {
             actors: vec![Actor {
                 id: "telegram:anna".into(),
                 role: role::FROM.into(),
+                name: "Anna".into(),
             }],
             text: format!("Nachricht {n}"),
             fields: vec![("chat".into(), "Familie".into())],
