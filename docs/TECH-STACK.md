@@ -6,7 +6,7 @@ Stand: 2026-10-30 · ersetzt die Supabase-Entscheidung vom 2026-08-09 (`TrustInA
 
 1. **Rust**, neu begonnen. Kein Code aus den alten Prototypen wird übernommen, nur Ideen.
 2. **Plattformunabhängig:** Desktop (Windows, macOS, Linux), Mobile (Android, iOS), später **IoT** (Embedded).
-3. **Deploy auf den Home Server `heimserver`**, mit Komodo, Tailscale, LiteLLM, Beszel und Dozzle.
+3. **Deploy auf den Heimserver**, mit Komodo, Tailscale, LiteLLM, Beszel und Dozzle.
 4. **Local-first:** Die Daten liegen auf deinem Gerät. Der Server ist eine Kopie und Helfer, nicht der Herr.
 
 ## Der Stack auf einen Blick
@@ -22,11 +22,11 @@ Stand: 2026-10-30 · ersetzt die Supabase-Entscheidung vom 2026-08-09 (`TrustInA
 | UI | **Leptos** (CSR → WASM) | UI in Rust, teilt die Typen direkt mit dem Kern, kein TS-Zwilling |
 | App-Hülle | **Tauri 2** | ein Projekt für Windows, macOS, Linux, Android und iOS. Mit Updater, Signierung und fertiger GitHub Action |
 | Server | **axum** + `tokio` | Sync-API, liefert dieselbe UI als Web-App aus, KI-Proxy |
-| KI | **LiteLLM auf heimserver** (OpenAI-kompatibel) | lokale Modelle (z. B. qwen3) als Standard. Claude nur über deinen Masken-Filter |
-| Logs | `tracing` (JSON) | Dozzle liest und alarmiert, wie bei deinen anderen Stacks |
+| KI | **LiteLLM auf dem Heimserver** (OpenAI-kompatibel) | lokale Modelle (z. B. qwen3) als Standard. Claude nur über einen Masken-Filter |
+| Logs | `tracing` (JSON) | zum Beispiel Dozzle liest und alarmiert |
 | Lint / Format | `rustfmt` + `clippy -D warnings` | ein Werkzeug, keine Diskussion |
 | Tests | `cargo test` + `proptest` (Ledger) + axum-Integrationstests | Playwright-E2E ab M2 |
-| CI/CD | **GitHub Actions** → **GHCR** → **Komodo** (Auto-Update) | GitHub erreicht heimserver nicht, also zieht Komodo das Image selbst |
+| CI/CD | **GitHub Actions** → **GHCR** → **Komodo** (Auto-Update) | GitHub erreicht den Heimserver nicht, also zieht Komodo das Image selbst |
 | Netz | **Tailscale** (nur Tailnet) | keine offenen Ports nach außen |
 
 ## Architektur
@@ -42,7 +42,7 @@ Stand: 2026-10-30 · ersetzt die Supabase-Entscheidung vom 2026-08-09 (`TrustInA
         │          ┌────────────┴────────────┐          │
         │          │                         │          │
         │    apps/desktop (Tauri 2)     apps/server (axum) ──► LiteLLM :8085 ──► Ollama / Claude
-        │    Win · mac · Linux          auf heimserver, Docker            (Masken-Filter)
+        │    Win · mac · Linux          auf dem Heimserver, Docker            (Masken-Filter)
         │    Android · iOS                   │
         │          │    UI: apps/ui (Leptos) │ liefert apps/ui auch als Web-App aus
         │          └──────── Sync ───────────┘
@@ -68,9 +68,9 @@ So bleiben drei Versprechen technisch eingelöst: *nichts wird heimlich verände
 | Supabase / Cloud | widerspricht local-first | nie für private Daten |
 | Dioxus statt Tauri + Leptos | Tauri ist bei Mobile, Signierung und Releases reifer | falls Tauri mobil hakt |
 
-## Entwicklungsumgebung (Windows-PC)
+## Entwicklungsumgebung (Windows)
 
-Vorhanden: Rust 1.99 (Ziel `x86_64-pc-windows-gnu`), Node 24, Docker 29, `gh` angemeldet.
+Getestet mit: Rust 1.99 (Ziel `x86_64-pc-windows-gnu`), Node 24, Docker 29, `gh` angemeldet.
 
 Noch nötig:
 ```bash

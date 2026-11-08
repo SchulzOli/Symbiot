@@ -1,4 +1,4 @@
-//! F5 acceptance: devices sync through heimserver. heimserver runs as a real HTTP server, the devices are
+//! F5 acceptance: devices sync through the home server. The home server runs as a real HTTP server, the devices are
 //! stores on this machine — like the desktop app, which uses the same client.
 
 use std::sync::{Arc, Mutex};
@@ -8,10 +8,10 @@ use symbiot_core::{EdgeKind, NodeKind, Policy, Signer};
 use symbiot_store::Store;
 use symbiot_sync::{Error, Remote, Report};
 
-/// heimserver with its own key, set up for the person behind `words`.
-async fn heimserver(words: &str) -> String {
+/// The home server with its own key, set up for the person behind `words`.
+async fn home_server(words: &str) -> String {
     let mut store = Store::open_in_memory(Signer::from_seed([50; 32])).unwrap();
-    store.certify_self(words, "heimserver").unwrap();
+    store.certify_self(words, "Heimserver").unwrap();
     let app = symbiot_server::app(store, None, None);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -36,7 +36,7 @@ async fn sync(d: &Device, url: &str) -> Result<Report, Error> {
         .unwrap()
 }
 
-/// The titles heimserver shows in its web UI.
+/// The titles the home server shows in its web UI.
 async fn titles_on_sz(url: &str) -> Vec<String> {
     let nodes: Value = http_get(&format!("{url}/api/nodes")).await;
     let mut t: Vec<String> = nodes
@@ -79,7 +79,7 @@ fn titles(d: &Device) -> Vec<String> {
 #[tokio::test(flavor = "multi_thread")]
 async fn offline_nodes_reach_sz_and_the_second_device() {
     let words = symbiot_store::new_words().unwrap();
-    let url = heimserver(&words).await;
+    let url = home_server(&words).await;
     let pc = device(1, Some(&words), "PC");
     {
         // Offline at the PC.
@@ -124,7 +124,7 @@ async fn offline_nodes_reach_sz_and_the_second_device() {
 #[tokio::test(flavor = "multi_thread")]
 async fn strangers_tampering_and_forks_are_rejected() {
     let words = symbiot_store::new_words().unwrap();
-    let url = heimserver(&words).await;
+    let url = home_server(&words).await;
 
     // Another person, and a device that was never set up.
     let stranger = device(3, Some(&symbiot_store::new_words().unwrap()), "Fremd");
@@ -182,7 +182,7 @@ async fn strangers_tampering_and_forks_are_rejected() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_revoked_device_is_cut_off() {
     let words = symbiot_store::new_words().unwrap();
-    let url = heimserver(&words).await;
+    let url = home_server(&words).await;
     let pc = device(1, Some(&words), "PC");
     let phone = device(2, Some(&words), "Handy");
     phone
@@ -211,7 +211,7 @@ async fn a_revoked_device_is_cut_off() {
 #[tokio::test(flavor = "multi_thread")]
 async fn concurrent_edits_end_the_same_everywhere() {
     let words = symbiot_store::new_words().unwrap();
-    let url = heimserver(&words).await;
+    let url = home_server(&words).await;
     let pc = device(1, Some(&words), "PC");
     let phone = device(2, Some(&words), "Handy");
     let goal = pc
@@ -265,7 +265,7 @@ async fn concurrent_edits_end_the_same_everywhere() {
 #[tokio::test(flavor = "multi_thread")]
 async fn deleted_and_home_only_content_stays_away() {
     let words = symbiot_store::new_words().unwrap();
-    let url = heimserver(&words).await;
+    let url = home_server(&words).await;
     let pc = device(1, Some(&words), "PC");
     let phone = device(2, Some(&words), "Handy");
     let gone = {
@@ -298,7 +298,7 @@ async fn deleted_and_home_only_content_stays_away() {
     assert!(titles(&phone).is_empty());
     assert!(titles_on_sz(&url).await.is_empty());
 
-    // What heimserver hands out of the PC's chain: no title of the deleted node, no diary entry.
+    // What the home server hands out of the PC's chain: no title of the deleted node, no diary entry.
     let pc_key = pc.lock().unwrap().device();
     let (p, u) = (phone.clone(), url.clone());
     let chain = tokio::task::spawn_blocking(move || Remote::new(&u).pull(&p, &pc_key, None))

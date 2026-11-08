@@ -1,7 +1,7 @@
 name: Image
 
-# Server image for the home server. Komodo on heimserver pulls :main (auto-update);
-# GitHub cannot reach heimserver, so heimserver pulls instead of GitHub pushing.
+# Server image for the home server. Komodo on the home server pulls :main (auto-update);
+# GitHub cannot reach the home server, so it pulls instead of GitHub pushing.
 on:
   push:
     branches: [main]

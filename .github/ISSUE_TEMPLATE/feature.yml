@@ -13,6 +13,6 @@ body:
     id: done
     attributes:
       label: Fertig, wenn …
-      description: Abnahmekriterien (Test grün · in der App sichtbar · auf heimserver deployed · im Ledger nachvollziehbar)
+      description: Abnahmekriterien (Test grün · in der App sichtbar · auf dem Heimserver deployed · im Ledger nachvollziehbar)
     validations:
       required: true

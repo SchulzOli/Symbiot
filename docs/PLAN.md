@@ -15,7 +15,7 @@ Erst danach wird das Skelett dicker. Jeder Meilenstein endet mit einem **Checkpo
 | Bauen (CI) | GitHub Actions: fmt · clippy · test · WASM-UI · Server-Image | M0 |
 | Releasen | Tag `v*` → `tauri-action` → Windows-Installer (+ Linux/macOS) als GitHub Release | M1 |
 | Container | Server-Image → `ghcr.io/schulzoli/symbiot-server:{main,sha,version}` | M1 |
-| Deployen | Komodo-Stack `symbiot` auf heimserver, **Auto-Update** zieht `:main` | M1 |
+| Deployen | Komodo-Stack `symbiot` auf dem Heimserver, **Auto-Update** zieht `:main` | M1 |
 | Erreichbar | `tailscale serve` → `https://heimserver.example.ts.net:<port>` (nur Tailnet) | M1 |
 | Betreiben | `/health`, `/ledger/verify`, Daten-Volume unter `/opt/stacks/symbiot` | M1 |
 | Beobachten | JSON-Logs → **Dozzle**-Alarm, Container-Status → **Beszel** → Alarm-Raum in Matrix | M1 |
@@ -37,10 +37,10 @@ Erst danach wird das Skelett dicker. Jeder Meilenstein endet mit einem **Checkpo
 - Server: `GET /health`, `POST/GET /nodes`, `GET /ledger/verify`, liefert die UI aus.
 - UI (Leptos): Knoten anlegen, Liste, Knopf „Kette prüfen“.
 - Desktop: Tauri-Hülle um dieselbe UI, lokale SQLite, eigener Schlüssel.
-- `image.yml` → GHCR · `release.yml` → Windows-Installer · Komodo-Stack auf heimserver · Dozzle- und Beszel-Alarme.
+- `image.yml` → GHCR · `release.yml` → Windows-Installer · Komodo-Stack auf dem Heimserver · Dozzle- und Beszel-Alarme.
 
 > **⛳ Checkpoint M1:** Du installierst die Desktop-App aus einem GitHub Release, legst ein Ziel an und siehst „Kette ok“.
-> Gleichzeitig läuft die Web-Version auf heimserver über Tailscale. Ein Commit auf `main` landet ohne Handgriff auf heimserver.
+> Gleichzeitig läuft die Web-Version auf dem Heimserver über Tailscale. Ein Commit auf `main` landet ohne Handgriff auf dem Heimserver.
 > Ein absichtlich erzeugter Fehler erscheint als Alarm im Matrix-Raum.
 
 ### M2 — Verknüpfen *(F3)*
@@ -53,45 +53,48 @@ KI-Vorschlag über LiteLLM mit Zitaten. Annehmen und Ablehnen werden im Ledger f
 > Eine Woche lang selbst benutzen (Dogfooding).
 
 ### M4 — Synchron *(F5)*
-Desktop ↔ heimserver tauschen Ketten aus. Offline schreiben, später abgleichen.
+Desktop ↔ Heimserver tauschen Ketten aus. Offline schreiben, später abgleichen.
 
 ### M5 — Überall *(F6)*
 Android-Build aus derselben Codebasis, signiertes APK im Release. iOS sobald ein Mac oder macOS-Runner bereitsteht.
 
 ### M6 — Sensor *(F7)*
-ESP32-C3 mit `symbiot-core` signiert einen Beleg (z. B. Raumklima oder Schritte) und schickt ihn an heimserver.
+ESP32-C3 mit `symbiot-core` signiert einen Beleg (z. B. Raumklima oder Schritte) und schickt ihn an den Heimserver.
 Beweis, dass „ein Gerät = eine Kette“ bis hinunter zum Mikrocontroller trägt.
 
 ## Lebensgraph *(Vorschlag, E14)*
 
-Nach M6 oder parallel dazu. Die Reihenfolge folgt den Fragen aus E14: zuerst die Quellen mit den meisten
-Personen, Gesprächen und Themen.
+Nach M6 oder parallel dazu. Zwei getrennte Schichten: Integration holt Rohdaten herein, Aufbereitung leitet daraus
+Dinge ab (ELT). Die Quellen sind Beispiele, jede ist ein eigener Adapter.
 
-### M7 — Erinnern *(Importe und Beleg-Schicht)*
-Einmalige Importe als Adapter mit eigener Kette: Telegram-Export (JSON), WhatsApp-Chat-Export, Mail (mbox oder
-IMAP), GitHub-Historie. Blob-Speicher für Anhänge. Zeitleiste und Volltextsuche über alle Belege.
+### M7 — Integration *(Rohdaten laden)*
+Rohdaten-Format als Vertrag zwischen den Schichten. Erste Import-Adapter mit eigener Kette, z. B. Chat-Export,
+mbox und Git-Historie. Idempotenter Import, Datei-Speicher nach Inhalts-Hash, Zeitleiste und Volltextsuche über alle
+Belege.
 
-> **⛳ Checkpoint M7:** Ein Jahr Telegram und GitHub ist importiert, die Kette prüft „ok“, die Suche findet eine
-> bestimmte Nachricht in unter einer Sekunde.
+> **⛳ Checkpoint M7:** Ein Jahr Chat und Git ist importiert, ein zweiter Import ändert nichts, die Kette prüft „ok“,
+> die Suche findet eine bestimmte Nachricht in unter einer Sekunde.
 
-### M8 — Wer und was *(Dinge-Schicht)*
-Personen, Gespräche, Aussagen und Themen aus den Belegen, lokal herausgezogen. Zusammenführen und Trennen als
-Einträge. Fragen in Worten, Antworten mit geprüften Quellen.
+### M8 — Aufbereitung *(Dinge ableiten)*
+Aufbereiter als eigene Geräte mit Herkunft an jedem Ergebnis. Personen, Gespräche, Aussagen und Themen,
+lokal herausgezogen. Zusammenführen und Trennen als Einträge. Fragen in Worten, Antworten mit geprüften Quellen.
+Neu aufbereiten mit einer neuen Version, ohne die Quellen erneut abzufragen.
 
 > **⛳ Checkpoint M8:** „Wer hat X gut gefunden?“ und „Seit wann arbeite ich an Z?“ liefern richtige Antworten mit
-> Zitat und Link zur Originalnachricht.
+> Zitat und Link zum Original-Beleg.
 
-### M9 — Zeit *(Aktivitäten)*
-Live-Adapter für Web-Verlauf, Steam und Android (App-Nutzung, Standort, setzt M5 voraus), dazu Fotos und
-Screenshots mit OCR. Kategorien als angenommene Regeln. Ansicht „Wie verbringe ich meine Zeit“.
+### M9 — Zeit *(Massendaten und Aktivitäten)*
+Live-Adapter für Quellen mit vielen Werten, z. B. Web-Verlauf, Spiele und Smartphone (setzt M5 voraus), dazu Fotos
+und Screenshots mit OCR. Massendaten in Parquet, Auswertung mit DuckDB. Kategorien als angenommene Regeln. Ansicht
+„Wie verbringe ich meine Zeit“.
 
 ### M10 — Gespräche *(Angesicht zu Angesicht)*
-Sprachnotizen und Aufnahmen mit Einwilligung, lokal mit Whisper transkribiert. Vorschläge „Warst du mit Anna
+Sprachnotizen und Aufnahmen mit Einwilligung, lokal mit Whisper transkribiert. Vorschläge „Warst du mit Y
 zusammen?“ aus Kalender, Standort und Fotos.
 
 ## Arbeitsweise
 
 - **Trunk-based:** kurze Branches, Pull Request mit grüner CI, Squash-Merge nach `main`.
 - **Versionen:** SemVer, Tag `vX.Y.Z` löst den Release aus. `0.x` bis M3.
-- **Definition of Done** pro Feature: Tests grün · in der App sichtbar · auf heimserver deployed · im Ledger nachvollziehbar.
+- **Definition of Done** pro Feature: Tests grün · in der App sichtbar · auf dem Heimserver deployed · im Ledger nachvollziehbar.
 - **Regel aus der Vision:** Die KI schlägt vor, der Mensch entscheidet. Nichts wird automatisch ausgeführt.

@@ -17,4 +17,4 @@ body:
   - type: input
     id: where
     attributes:
-      label: Wo? (Desktop / Web auf heimserver / Android, Version)
+      label: Wo? (Desktop / Web auf dem Heimserver / Android, Version)

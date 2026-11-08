@@ -37,7 +37,7 @@ müssen gemessen werden.
    RFC 9162 über alle Eintrags-Hashes. Damit lässt sich ab einem Checkpoint prüfen, und einzelne alte Einträge lassen
    sich mit O(log n) Hashes beweisen. Das Format ist dasselbe wie bei C2SP `tlog-checkpoint` und COSE Receipts
    (RFC 9942). Ein Export als echtes Transparenzlog bleibt also offen.
-5. **Die eigenen Geräte bezeugen einander** (Witnessing nach dem Vorbild von C2SP `tlog-witness` und Sigsum). heimserver
+5. **Die eigenen Geräte bezeugen einander** (Witnessing nach dem Vorbild von C2SP `tlog-witness` und Sigsum). Der Heimserver
    merkt sich für jede Kette den letzten gesehenen Stand und schlägt Alarm, wenn eine Kette gekürzt wird oder sich
    verzweigt. Das macht „nichts wird heimlich verändert“ auch zwischen Geräten prüfbar.
 6. **Was nie entfernt wird:** Köpfe, Hashes und Signaturen, Löschmarker, Richtlinien, Grants und Revokes,
@@ -57,8 +57,8 @@ Legende Passung: ●●● passt direkt · ●●○ passt mit Anpassung · ●�
 
 | Technik | Was sie löst | Kosten | Ein Schreiber | no_std / ESP32 |
 |---|---|---|---|---|
-| **C2SP tlog-tiles + Checkpoints** (Static CT API, Sunlight, Tessera) | Log als unveränderliche „Kacheln“ zu 256 Hashes. Ein kleiner signierter Checkpoint (Herkunft, Größe, Root) ist das einzige veränderliche Objekt. Gut zu cachen, Prüfung über Beweise | ein Merkle-Baum neben der Kette, O(log n) Zustand beim Anhängen | ●●● Ein Log hat genau einen Signierer, wie bei uns | ●●○ Baum-Zustand ~1 KB (Spitzen), Checkpoint signieren geht; Kacheln ausliefern macht heimserver |
-| **Witnessing / Cosignaturen** (C2SP tlog-witness, Sigsum) | Verhindert *Split View* und Rückspulen: Zeugen cosignieren nur, was mit dem letzten Stand konsistent ist | Zeuge speichert pro Log nur den letzten Stand | ●●● Eigene Geräte und heimserver sind natürliche Zeugen | ●○○ Sensor ist kein Zeuge, nur Bezeugter |
+| **C2SP tlog-tiles + Checkpoints** (Static CT API, Sunlight, Tessera) | Log als unveränderliche „Kacheln“ zu 256 Hashes. Ein kleiner signierter Checkpoint (Herkunft, Größe, Root) ist das einzige veränderliche Objekt. Gut zu cachen, Prüfung über Beweise | ein Merkle-Baum neben der Kette, O(log n) Zustand beim Anhängen | ●●● Ein Log hat genau einen Signierer, wie bei uns | ●●○ Baum-Zustand ~1 KB (Spitzen), Checkpoint signieren geht; Kacheln ausliefern macht der Heimserver |
+| **Witnessing / Cosignaturen** (C2SP tlog-witness, Sigsum) | Verhindert *Split View* und Rückspulen: Zeugen cosignieren nur, was mit dem letzten Stand konsistent ist | Zeuge speichert pro Log nur den letzten Stand | ●●● Eigene Geräte und der Heimserver sind natürliche Zeugen | ●○○ Sensor ist kein Zeuge, nur Bezeugter |
 | **Merkle Mountain Range** (MMRIVER-Entwurf, ePrint 2025/234) | Anhängbarer Akkumulator, alte Knoten ändern sich nie, Inklusionsbeweise O(log n) | 32 B × Höhe Zustand | ●●○ Gleichwertig zum RFC-9162-Baum; der ist durch C2SP und COSE Receipts besser unterstützt | ●●● sehr klein |
 | **Trillian → Tessera** | Bibliothek für Tile-Logs, Bündelung beim Einreihen (`WithBatching`), Witness-Policy | Bündel gehen bei einem Absturz vor dem Einreihen verloren | ●●○ Vorbild für „im Speicher sammeln, dann einmal signieren“ | — (Go, Server) |
 | **IETF SCITT + COSE Receipts** (RFC 9943, RFC 9942) | Standardformat für „Eintrag X ist im Log mit Root R“ (Inklusion, Konsistenz) | CBOR/COSE-Abhängigkeit | ●●○ Für Belege nach außen (Phase WIR/ALLE), nicht für den Kern | ●○○ COSE auf ESP32 möglich, aber unnötig |
@@ -160,8 +160,8 @@ content.root = Merkle-Root nach RFC 9162 über leaf_i = sha256(0x00 ‖ part[i])
   Richtlinie des Knotens (E3).
 - **Verkürzen wirkt sofort:** Eine kürzere Frist räumt auch alte Daten ab. Die Oberfläche sagt das vorher.
 - **Verdichten über die Zusammenfassung hinaus** (z. B. stündliche Werte aus 5-min-Bündeln) ist ein *neuer*
-  Eintrag `Rollup { quelle: (kette, seq-bereich), werte }` in der Kette des Geräts, das rechnet (heimserver). Solange die
-  Rohdaten da sind, lässt er sich nachrechnen. Danach ist er eine Aussage von heimserver, nicht vom Sensor. Die Oberfläche
+  Eintrag `Rollup { quelle: (kette, seq-bereich), werte }` in der Kette des Geräts, das rechnet (Heimserver). Solange die
+  Rohdaten da sind, lässt er sich nachrechnen. Danach ist er eine Aussage vom Heimserver, nicht vom Sensor. Die Oberfläche
   zeigt das so an.
 
 ### c4. Checkpoints und schnelles Prüfen
@@ -178,18 +178,18 @@ content.root = Merkle-Root nach RFC 9162 über leaf_i = sha256(0x00 ‖ part[i])
   eigenes Gerät bezeugt hat (c5), und ist sofort nutzbar. Ältere Köpfe lädt und prüft es im Hintergrund nach. Bis
   dahin zeigt die Oberfläche „geprüft ab Checkpoint X“.
 - **Sync-Seiten zu 256 Einträgen** (wie die Kacheln bei C2SP). Volle Seiten ändern sich nie (außer durch
-  Wegräumen von Inhalt, nicht von Köpfen) und lassen sich auf heimserver cachen und komprimieren. Ein späterer Export als
+  Wegräumen von Inhalt, nicht von Köpfen) und lassen sich auf dem Heimserver cachen und komprimieren. Ein späterer Export als
   `tlog-tiles` bleibt so einfach.
 - **Snapshots der Projektion** (SQLite) sind nur Cache. Sie tragen die Schema-Version und den Stand
   `(Kette → seq)` und werden nie signiert oder synchronisiert. Bei Zweifel baut man sie aus den Ketten neu auf.
 
 ### c5. Zeugen: Rückspulen und Verzweigen erkennen
 
-- Jedes Gerät (vor allem heimserver) speichert pro bekannter Kette den letzten Stand `(seq, hash)`. Eine neue Lieferung
+- Jedes Gerät (vor allem der Heimserver) speichert pro bekannter Kette den letzten Stand `(seq, hash)`. Eine neue Lieferung
   muss daran anschließen. Zwei verschiedene Einträge mit gleicher `seq` und gültiger Signatur sind ein **Beweis
   für Verzweigung**. Sie werden gespeichert, es gibt einen Alarm, und der Schlüssel wird zum Widerruf
   vorgeschlagen (E5).
-- heimserver schreibt höchstens einmal pro Sync-Runde bzw. täglich einen Eintrag `Witness { [(kette, seq, hash)] }` in
+- Der Heimserver schreibt höchstens einmal pro Sync-Runde bzw. täglich einen Eintrag `Witness { [(kette, seq, hash)] }` in
   *seine* Kette, also gebündelt. Damit verankern sich die Ketten gegenseitig. Wer Geschichte umschreiben will,
   braucht mehr als einen Schlüssel.
 - Das deckt auch die Lücke aus dem Proptest auf, der kommentiert: „Dropping the tip … is caught by sync“.
@@ -214,7 +214,7 @@ content.root = Merkle-Root nach RFC 9162 über leaf_i = sha256(0x00 ‖ part[i])
    Gerätebestätigungen; Belege mit Verweis von einem Knoten. Diese Einträge sind klein und tragen die Prüfbarkeit.
 7. **Archiv-Schnitt** (Köpfe vor einem Checkpoint verwerfen, wie Git `--depth` oder EIP-4444) gibt es nur für
    Maschinen-Ketten und nur auf ausdrücklichen Wunsch. Die alten Köpfe wandern zuvor in ein verschlüsseltes Archiv
-   (heimserver oder Backup). Danach steht an der Kette: „geprüft ab Checkpoint X, ältere Historie im Archiv Y“.
+   (Heimserver oder Backup). Danach steht an der Kette: „geprüft ab Checkpoint X, ältere Historie im Archiv Y“.
    Menschen-Ketten nie.
 
 ---
@@ -236,7 +236,7 @@ direkt (`crates/symbiot-core/src/ledger.rs`). Damit kann man keinen Inhalt entfe
 | F8 | `EvidenceBatch`, `SetRetention`, `Rollup`, `Aufgeräumt` | mit dem ersten Adapter | erst nötig, wenn Maschinen schreiben |
 | F9 | `SensorBatch` (ein Teil, Werte + Zusammenfassung) | M6 | Sensor |
 
-**Übergang:** Bis M3 ist Symbiot `0.x`. Die bestehenden Ketten (heimserver, PC) lassen sich einmalig in v2 überführen: Jeder
+**Übergang:** Bis M3 ist Symbiot `0.x`. Die bestehenden Ketten (Heimserver, PC) lassen sich einmalig in v2 überführen: Jeder
 alte Eintrag wird neu signiert, und der erste v2-Eintrag verweist auf den alten Tip. Das ist billiger als zwei
 Formate dauerhaft zu tragen. Weil `NodeId` aus dem Eintrags-Hash abgeleitet wird (`from_entry_hash`), ändern sich
 dabei alle IDs. Deshalb sollte die Umstellung **vor** echten Daten aus Adaptern und vor M4 passieren.
@@ -263,7 +263,7 @@ dabei alle IDs. Deshalb sollte die Umstellung **vor** echten Daten aus Adaptern 
 - **Abgeleitete Knoten:** Wird ein Beleg zum Knoten, wird sein Inhalt kopiert. Soll das Löschen des Knotens auch
   den Beleg-Teil wegräumen (Kaskade)? Und umgekehrt: Soll die Frist des Belegs nie den Knoten berühren?
   Empfehlung: Kaskade ja, aber nur in Richtung Knoten → Beleg.
-- **Rollups von heimserver** sind Aussagen von heimserver, keine Messungen des Sensors. Ist das für Belege („bewiesen“) genug?
+- **Rollups vom Heimserver** sind Aussagen vom Heimserver, keine Messungen des Sensors. Ist das für Belege („bewiesen“) genug?
 - **Vertrauen in Checkpoints:** Prüfen ab Checkpoint vertraut dem eigenen Gerät, das ihn bezeugt hat. Das
   schützt nicht, wenn der Personen-Schlüssel (E5) kompromittiert ist.
 - **ESP32-Kosten ungeprüft:** Wie lange Ed25519-Signieren auf dem ESP32-C3 dauert (32-bit-Backend von

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Symbiot auf heimserver einrichten (angelegt per Claude, 2026-10-30).
-# Aufruf auf heimserver:  sudo bash install.sh   (liegt neben compose.yaml)
+# Symbiot auf dem Heimserver einrichten (angelegt per Claude, 2026-10-30).
+# Aufruf auf dem Heimserver:  sudo bash install.sh   (liegt neben compose.yaml)
 # Legt /opt/stacks/symbiot an, trägt Port 8449 in tailscale serve ein und startet den Stack.
 # Mehrfach ausführbar: vorhandene Daten und Einträge bleiben unverändert.
 set -euo pipefail
@@ -54,5 +54,5 @@ curl -s http://127.0.0.1:8100/health && echo
 if docker exec tailscale tailscale serve status 2>/dev/null | grep -q ":$PORT"; then
   echo "Tailscale: https://heimserver.example.ts.net:$PORT aktiv"
 else
-  echo "Tailscale: :$PORT noch nicht aktiv. Einmal 'docker restart tailscale' (kurze Unterbrechung des Tailnet-Zugriffs auf heimserver)."
+  echo "Tailscale: :$PORT noch nicht aktiv. Einmal 'docker restart tailscale' (kurze Unterbrechung des Tailnet-Zugriffs auf dem Heimserver)."
 fi

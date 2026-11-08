@@ -1,6 +1,6 @@
 //! Symbiot AI — „Nächsten Schritt vorschlagen“ (F4).
 //!
-//! Builds the context for a goal, asks an OpenAI-compatible endpoint (LiteLLM on heimserver)
+//! Builds the context for a goal, asks an OpenAI-compatible endpoint (LiteLLM on the home server)
 //! and turns the reply into a [`Proposal`]. Nothing here writes: a proposal only
 //! changes data once the human accepts it (see `Store::accept_proposal`).
 //!
@@ -434,7 +434,7 @@ pub trait Advisor: Send + Sync {
     fn suggest_rules(&self, ctx: &RuleContext) -> Result<Vec<RuleProposal>, Error>;
 }
 
-/// An OpenAI-compatible endpoint, normally LiteLLM on heimserver.
+/// An OpenAI-compatible endpoint, normally LiteLLM on the home server.
 pub struct LiteLlm {
     config: Config,
     agent: ureq::Agent,
