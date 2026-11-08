@@ -29,7 +29,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
-          tool: trunk
+          tool: trunk@0.22.1
+      - name: Cache trunk tools (wasm-bindgen, wasm-opt)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/trunk
+            ~/Library/Caches/trunk
+            ~/AppData/Local/trunk
+          key: trunk-tools-${{ runner.os }}-0.22.1-${{ hashFiles('Cargo.lock', 'apps/ui/Trunk.toml') }}
+          restore-keys: trunk-tools-${{ runner.os }}-0.22.1-
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

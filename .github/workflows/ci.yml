@@ -48,10 +48,25 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
-          tool: trunk
+          tool: trunk@0.22.1
+      - name: Cache trunk tools (wasm-bindgen, wasm-opt)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/trunk
+            ~/Library/Caches/trunk
+            ~/AppData/Local/trunk
+          key: trunk-tools-${{ runner.os }}-0.22.1-${{ hashFiles('Cargo.lock', 'apps/ui/Trunk.toml') }}
+          restore-keys: trunk-tools-${{ runner.os }}-0.22.1-
       - name: trunk build
         working-directory: apps/ui
-        run: trunk build --release
+        # Downloads from GitHub Releases fail now and then; retry instead of failing the job.
+        run: |
+          for i in 1 2 3; do
+            trunk build --release && exit 0
+            echo "trunk build failed (attempt $i), retrying in 30 s"; sleep 30
+          done
+          exit 1
       - name: Clippy desktop
         run: cargo clippy -p symbiot-desktop --all-targets -- -D warnings
       - uses: actions/setup-node@v4
