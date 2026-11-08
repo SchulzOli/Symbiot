@@ -1,0 +1,4 @@
+# Feste Werkzeug-Versionen, damit CI und Dockerfile sie vorab laden und zwischenspeichern können.
+# wasm-bindgen folgt Cargo.lock und wird hier nicht festgelegt.
+[tools]
+wasm_opt = "version_131"
