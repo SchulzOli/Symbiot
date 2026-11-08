@@ -289,6 +289,7 @@ impl Store {
         }
         for e in &accepted {
             insert_entry(&tx, e)?;
+            crate::evidence::receive_evidence(&tx, e)?;
         }
         rebuild_projection(&tx, &me)?;
         tx.commit()?;

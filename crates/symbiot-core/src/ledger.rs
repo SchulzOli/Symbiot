@@ -18,6 +18,7 @@ use sha2::{Digest, Sha256};
 use crate::PROTOCOL_VERSION;
 use crate::bytes::{Blob, EdgeId, Hash, NodeId, PubKey, RuleId, Salt, Sig};
 use crate::edge::EdgeKind;
+use crate::evidence::Evidence;
 use crate::kind;
 use crate::merkle;
 use crate::node::NodeKind;
@@ -107,6 +108,11 @@ pub enum Op {
     RemoveSensitivityRule {
         rule: RuleId,
     },
+    /// E14: raw data from a source, unchanged. Written by adapters (each one a device with its
+    /// own chain, E7). The head keeps one key per item, the content one part per item.
+    RecordEvidence {
+        items: Vec<Evidence>,
+    },
 }
 
 fn enc<T: Serialize + ?Sized>(v: &T) -> Vec<u8> {
@@ -118,10 +124,11 @@ fn dec<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, Decode> {
 }
 
 impl Op {
-    /// Splits the op into its kind id, the head params and the removable content.
-    /// Only title and body are content; ids, kinds, sources and the model stay in the head.
-    pub fn encode(&self) -> (u16, Vec<u8>, Option<Vec<u8>>) {
-        match self {
+    /// Splits the op into its kind id, the head params and the removable content parts.
+    /// Only title and body (and raw data) are content; ids, kinds, sources and the model stay
+    /// in the head.
+    pub fn encode(&self) -> (u16, Vec<u8>, Vec<Vec<u8>>) {
+        let (kind, params, content) = match self {
             Op::CreateNode {
                 kind: k,
                 title,
@@ -191,7 +198,16 @@ impl Op {
                 None,
             ),
             Op::RemoveSensitivityRule { rule } => (kind::REMOVE_SENSITIVITY_RULE, enc(rule), None),
-        }
+            Op::RecordEvidence { items } => {
+                let keys: Vec<Hash> = items.iter().map(Evidence::key).collect();
+                return (
+                    kind::EVIDENCE_BATCH,
+                    enc(&keys),
+                    items.iter().map(enc).collect(),
+                );
+            }
+        };
+        (kind, params, content.into_iter().collect())
     }
 }
 
@@ -296,6 +312,15 @@ impl LedgerEntry {
         }
     }
 
+    /// The keys of a raw-data batch (E14), read from the head: still there when the content
+    /// was removed. Empty for every other kind.
+    pub fn evidence_keys(&self) -> Result<Vec<Hash>, Decode> {
+        if self.head.kind != kind::EVIDENCE_BATCH {
+            return Ok(Vec::new());
+        }
+        dec(&self.head.params.0)
+    }
+
     /// Reads the entry as an [`Op`]. Removed content reads as empty title and body —
     /// check [`LedgerEntry::is_pruned`] to tell the two apart.
     pub fn op(&self) -> Result<Op, Decode> {
@@ -373,6 +398,18 @@ impl LedgerEntry {
                 }
             }
             kind::REMOVE_SENSITIVITY_RULE => Op::RemoveSensitivityRule { rule: dec(p)? },
+            kind::EVIDENCE_BATCH => {
+                let keys: Vec<Hash> = dec(p)?;
+                let items = match &self.content {
+                    None => Vec::new(),
+                    Some(parts) if parts.len() == keys.len() => parts
+                        .iter()
+                        .map(|part| dec(&part.data.0))
+                        .collect::<Result<_, _>>()?,
+                    Some(_) => return Err(Decode::Malformed),
+                };
+                Op::RecordEvidence { items }
+            }
             other => return Err(Decode::Unknown(other)),
         })
     }
@@ -428,8 +465,8 @@ impl Signer {
 
     /// Appends `op` after `prev` (the current tip of this device's chain, `None` for the first entry).
     pub fn append(&self, prev: Option<&LedgerEntry>, ts_ms: u64, op: Op) -> LedgerEntry {
-        let (kind, params, content) = op.encode();
-        self.sign(prev, ts_ms, kind, params, content.into_iter().collect())
+        let (kind, params, parts) = op.encode();
+        self.sign(prev, ts_ms, kind, params, parts)
     }
 
     /// Signs an entry of any kind with the given content parts (none → no content).

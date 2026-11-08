@@ -571,7 +571,7 @@ impl From<symbiot_store::Error> for ApiError {
     fn from(e: symbiot_store::Error) -> Self {
         use symbiot_store::Error::*;
         match e {
-            Invalid(_) => ApiError(StatusCode::BAD_REQUEST, e.to_string()),
+            Invalid(_) | BadEvidence { .. } => ApiError(StatusCode::BAD_REQUEST, e.to_string()),
             UnknownNode(_) | UnknownEdge(_) => ApiError(StatusCode::NOT_FOUND, e.to_string()),
             BadChain(_) => ApiError(StatusCode::BAD_REQUEST, e.to_string()),
             Untrusted => ApiError(StatusCode::FORBIDDEN, e.to_string()),

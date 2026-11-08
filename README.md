@@ -17,12 +17,13 @@ Hervorgegangen aus dem Ideengarten *TrustInAI*. Benannt nach der *Symbiose Mensc
 - [docs/FEATURES.md](docs/FEATURES.md): erste Features F1–F7 mit Abnahmekriterien
 - [docs/BETRIEB.md](docs/BETRIEB.md): Weg eines Commits bis zum Heimserver, Release, Einrichtung, Prüfen
 - [docs/ENTSCHEIDUNGEN.md](docs/ENTSCHEIDUNGEN.md): Entscheidungen E1–E14 (Löschen, Schlüssel, Verschlüsselung, Adapter, Bündeln, Symbiot + Connect, Lebensgraph)
+- [docs/ROHDATEN.md](docs/ROHDATEN.md): Format der Rohdaten, der Vertrag zwischen Integration und Aufbereitung (E14)
 
 ## Aufbau
 | Teil | Rolle |
 |---|---|
-| `crates/symbiot-core` | `no_std`-Kern: Knoten, signierte Hash-Kette (Kopf + entfernbarer Inhalt), Prüfung, Projektion |
-| `crates/symbiot-store` | SQLite: Kette als Wahrheit, Knoten als Projektion, Geräteschlüssel |
+| `crates/symbiot-core` | `no_std`-Kern: Knoten, signierte Hash-Kette (Kopf + entfernbarer Inhalt), Prüfung, Projektion, Rohdaten-Format (E14) |
+| `crates/symbiot-store` | SQLite: Kette als Wahrheit, Knoten und Rohdaten als Projektion, Geräteschlüssel |
 | `crates/symbiot-sync` | Abgleich (M4): signierte Anfragen, Client, der die eigene Kette sendet und fehlende holt |
 | `crates/symbiot-ai` | „Nächsten Schritt vorschlagen“: Kontext, Anfrage an LiteLLM, Prüfung der Quellen. Schreibt nie |
 | `apps/ui` | Leptos-Oberfläche, im Browser über `/api`, in Tauri über `invoke` |
