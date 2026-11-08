@@ -9,6 +9,7 @@ extern crate alloc;
 
 mod bytes;
 mod edge;
+pub mod evidence;
 pub mod kind;
 mod ledger;
 pub mod merkle;
@@ -19,6 +20,7 @@ pub mod rule;
 
 pub use bytes::{Blob, EdgeId, Hash, NodeId, PubKey, RuleId, Salt, Sig};
 pub use edge::{Edge, EdgeKind};
+pub use evidence::{Actor, Evidence, FileRef};
 pub use ledger::{
     ContentRef, Decode, Head, LedgerEntry, Op, Part, Signer, VerifyError, VerifyReport,
     build_chain, verify_chain, verify_message,

@@ -18,9 +18,13 @@ use symbiot_core::{
 /// `PRAGMA user_version` of the current schema. 0 with an `entry` column is the v1 format.
 /// 3: nodes carry `concurrent` (M4); the projection is rebuilt from the ledger on upgrade.
 /// 4: rules for what is sensitive and marks by hand (E4); `sensitive` holds the result.
-const SCHEMA_VERSION: i64 = 4;
+/// 5: raw data (E14) in `evidence`.
+const SCHEMA_VERSION: i64 = 5;
 
+mod evidence;
 mod sync;
+
+pub use evidence::{EvidenceQuery, Recorded, StoredEvidence};
 
 pub use symbiot_core::VerifyReport;
 pub use sync::{ChainHead, DeviceInfo, new_words};
@@ -56,6 +60,9 @@ pub enum Error {
     /// Two validly signed entries at the same position: the device key was used twice.
     #[error("Verzweigung in der Kette von {author} bei Eintrag {seq}")]
     Fork { author: PubKey, seq: u64 },
+    /// Raw data that breaks the contract (E14). Nothing of the import was written.
+    #[error("Beleg {id}: {reason}")]
+    BadEvidence { id: String, reason: String },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -193,10 +200,12 @@ impl Store {
                  PRIMARY KEY (author, seq, hash)
              );",
         )?;
+        conn.execute_batch(evidence::SCHEMA)?;
         if version > 0 && version < SCHEMA_VERSION {
             // Only the projection changed shape; the ledger is the truth.
             let tx = conn.unchecked_transaction()?;
             rebuild_projection(&tx, &signer.public())?;
+            evidence::rebuild_evidence(&tx)?;
             tx.commit()?;
         }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -471,7 +480,8 @@ fn append_in(tx: &Connection, signer: &Signer, op: Op) -> Result<Change> {
         | Op::CertifyDevice { .. }
         | Op::RevokeDevice { .. }
         | Op::AddSensitivityRule { .. }
-        | Op::RemoveSensitivityRule { .. } => vec![],
+        | Op::RemoveSensitivityRule { .. }
+        | Op::RecordEvidence { .. } => vec![],
         Op::UpdateNode { node, .. }
         | Op::MarkSensitive { node, .. }
         | Op::DeleteNode { node }
@@ -513,6 +523,7 @@ fn append_in(tx: &Connection, signer: &Signer, op: Op) -> Result<Change> {
             "Eine Regel braucht einen Namen und Stichwörter mit mindestens drei Buchstaben",
         ),
         ApplyError::Undecodable(_) => Error::Invalid("Eintrag nicht lesbar"),
+        ApplyError::BadEvidence => Error::Invalid("Rohdaten verletzen das Format (E14)"),
     })?;
 
     insert_entry(tx, &entry)?;
@@ -580,6 +591,7 @@ fn project(tx: &Connection, change: &Change) -> Result<()> {
             refresh_sensitive(tx, Some(node))?;
         }
         Change::Rejected | Change::Device => {}
+        Change::Evidence { .. } => evidence::project_evidence(tx, change)?,
         Change::Sensitivity { node, sensitive } => {
             tx.execute(
                 "INSERT OR REPLACE INTO by_hand (node_id, sensitive) VALUES (?1, ?2)",
@@ -717,7 +729,13 @@ fn next_ts(conn: &Connection) -> Result<u64> {
 /// Builds the projection tables again from every chain in the ledger.
 /// Only this device's chain and those of devices of the same person (E5) count.
 fn rebuild_projection(tx: &Connection, me: &PubKey) -> Result<()> {
-    let chains = all_chains(tx)?;
+    let mut chains = all_chains(tx)?;
+    // Raw data (E14) does not touch the graph and has its own table: leave it out of the replay,
+    // so a rebuild does not decode every item ever loaded.
+    for c in &mut chains {
+        c.retain(|e| e.head.kind != symbiot_core::kind::EVIDENCE_BATCH);
+    }
+    chains.retain(|c| !c.is_empty());
     let refs: Vec<&[LedgerEntry]> = chains.iter().map(Vec::as_slice).collect();
     let person = refs
         .iter()

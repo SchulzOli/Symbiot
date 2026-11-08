@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::bytes::{EdgeId, Hash, NodeId, PubKey, RuleId};
 use crate::edge::{Edge, EdgeKind};
+use crate::evidence::{self, Evidence};
 use crate::ledger::{Decode, LedgerEntry, Op};
 use crate::proposal::Proposal;
 use crate::rule::{self, Rule};
@@ -114,6 +115,9 @@ pub enum ApplyError {
     EmptyTitle,
     /// The entry is validly signed but cannot be read (unknown kind or broken params).
     Undecodable(Decode),
+    /// A raw-data batch that breaks the contract (E14): empty, too large, a key twice, a key
+    /// that does not fit its item, or an item without id, kind, time or prefixed actors.
+    BadEvidence,
 }
 
 impl fmt::Display for ApplyError {
@@ -132,6 +136,7 @@ impl fmt::Display for ApplyError {
             ApplyError::NoSources => f.write_str("Ein Vorschlag ohne Quellen wird verworfen"),
             ApplyError::EmptyTitle => f.write_str("Titel darf nicht leer sein"),
             ApplyError::Undecodable(d) => write!(f, "Eintrag nicht lesbar: {d}"),
+            ApplyError::BadEvidence => f.write_str("Rohdaten verletzen das Format (E14)"),
         }
     }
 }
@@ -168,6 +173,14 @@ pub enum Change {
     Policy {
         node: NodeId,
         policy: Policy,
+    },
+    /// E14: raw data was loaded. Nothing changes in the graph; the store keeps the items in a
+    /// table of their own. `items` is empty when the content was removed — `keys` stay.
+    Evidence {
+        entry: Hash,
+        author: PubKey,
+        keys: Vec<Hash>,
+        items: Vec<Evidence>,
     },
 }
 
@@ -317,6 +330,16 @@ impl Change {
                 view.edge(edge).ok_or(ApplyError::UnknownEdge(*edge))?;
                 Ok(Change::Unlinked(*edge))
             }
+            Op::RecordEvidence { items } => {
+                let keys = e.evidence_keys().map_err(ApplyError::Undecodable)?;
+                check_evidence(&keys, items, e.is_pruned())?;
+                Ok(Change::Evidence {
+                    entry: e.hash,
+                    author,
+                    keys,
+                    items: items.clone(),
+                })
+            }
             Op::SetPolicy {
                 node: id,
                 deletable,
@@ -333,6 +356,29 @@ impl Change {
             }
         }
     }
+}
+
+/// The contract for a raw-data batch (E14). Keys are checked even when the content is gone.
+fn check_evidence(keys: &[Hash], items: &[Evidence], pruned: bool) -> Result<(), ApplyError> {
+    if keys.is_empty() || keys.len() > evidence::MAX_BATCH_ITEMS {
+        return Err(ApplyError::BadEvidence);
+    }
+    let unique: BTreeSet<&Hash> = keys.iter().collect();
+    if unique.len() != keys.len() {
+        return Err(ApplyError::BadEvidence);
+    }
+    if pruned {
+        return Ok(());
+    }
+    if items.len() != keys.len() {
+        return Err(ApplyError::BadEvidence);
+    }
+    for (key, item) in keys.iter().zip(items) {
+        if item.key() != *key || item.check().is_err() {
+            return Err(ApplyError::BadEvidence);
+        }
+    }
+    Ok(())
 }
 
 /// Same rules for accepting and rejecting: a proposal names a known goal and known sources.
@@ -430,6 +476,8 @@ pub struct State {
     /// Marked or unmarked by hand; wins over every rule.
     pub by_hand: BTreeMap<NodeId, bool>,
     pub rules: BTreeMap<RuleId, Rule>,
+    /// E14: keys of the raw data seen. The items themselves live in the store.
+    pub evidence: BTreeSet<Hash>,
 }
 
 impl Lookup for State {
@@ -491,6 +539,9 @@ impl State {
                 self.refresh_sensitive(&node.id);
             }
             Change::Rejected | Change::Device => {}
+            Change::Evidence { keys, .. } => {
+                self.evidence.extend(keys.iter().copied());
+            }
             Change::Sensitivity { node, sensitive } => {
                 self.by_hand.insert(*node, *sensitive);
                 self.refresh_sensitive(node);
