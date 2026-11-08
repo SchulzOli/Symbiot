@@ -8,7 +8,7 @@ use symbiot_core::{
     Edge, EdgeId, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal, PubKey, Rule,
     RuleId, VerifyReport,
 };
-use symbiot_store::{DeviceInfo, Sensitivity, Store};
+use symbiot_store::{DeviceInfo, EvidenceQuery, Origin, Sensitivity, Store, StoredEvidence};
 use tauri::{Manager, State};
 
 struct AppStore(Arc<Mutex<Store>>);
@@ -175,6 +175,41 @@ fn verify_all(store: State<AppStore>) -> Result<Vec<VerifyReport>, String> {
 #[tauri::command]
 fn node_sensitivity(store: State<AppStore>, id: NodeId) -> Result<Sensitivity, String> {
     store.with(|s| s.sensitivity(id))
+}
+
+/// #30: the same filter as `GET /api/evidence`, as one argument.
+#[derive(serde::Deserialize)]
+struct EvidenceFilter {
+    q: Option<String>,
+    origin: Option<String>,
+    kind: Option<String>,
+    from: Option<u64>,
+    to: Option<u64>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+}
+
+#[tauri::command]
+fn list_evidence(
+    store: State<AppStore>,
+    filter: EvidenceFilter,
+) -> Result<Vec<StoredEvidence>, String> {
+    let blank = |v: Option<String>| v.filter(|x| !x.trim().is_empty());
+    let q = EvidenceQuery {
+        text: blank(filter.q),
+        origin: blank(filter.origin),
+        kind: blank(filter.kind),
+        from_ms: filter.from,
+        to_ms: filter.to,
+        limit: Some(filter.limit.unwrap_or(50).min(200)),
+        offset: filter.offset,
+    };
+    store.with(|s| s.evidence(&q))
+}
+
+#[tauri::command]
+fn evidence_origins(store: State<AppStore>) -> Result<Vec<Origin>, String> {
+    store.with(|s| s.evidence_origins())
 }
 
 #[tauri::command]
@@ -454,7 +489,9 @@ pub fn run() {
             list_rules,
             add_rule,
             remove_rule,
-            suggest_rules
+            suggest_rules,
+            list_evidence,
+            evidence_origins
         ])
         .run(tauri::generate_context!())
         .expect("error while running Symbiot");

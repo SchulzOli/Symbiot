@@ -33,7 +33,21 @@ pub struct EvidenceQuery {
     pub from_ms: Option<u64>,
     /// Before this time (exclusive).
     pub to_ms: Option<u64>,
+    /// Origin, the part of the id before the first `:`, e.g. `telegram`, `mail`, `git`.
+    pub origin: Option<String>,
+    /// Words to search for in text, names and fields. Every word must occur; a word also
+    /// matches as the start of a longer one (`wand` finds „Wandern“).
+    pub text: Option<String>,
     pub limit: Option<usize>,
+    /// Skip this many results (for „load more“).
+    pub offset: Option<usize>,
+}
+
+/// How many items one origin has.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct Origin {
+    pub origin: String,
+    pub count: usize,
 }
 
 /// One item as stored, with where it came from.
@@ -47,18 +61,29 @@ pub struct StoredEvidence {
     pub evidence: Evidence,
 }
 
+/// `evidence_fts` is contentless: the words are indexed, the text itself lives only in `item`.
 pub(crate) const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS evidence (
         key    BLOB PRIMARY KEY,
         entry  BLOB NOT NULL,
         part   INTEGER NOT NULL,
         author BLOB NOT NULL,
+        origin TEXT,
         kind   TEXT,
         at_ms  INTEGER,
         item   BLOB
     );
     CREATE INDEX IF NOT EXISTS evidence_time ON evidence (at_ms);
-    CREATE INDEX IF NOT EXISTS evidence_kind ON evidence (kind, at_ms);";
+    CREATE INDEX IF NOT EXISTS evidence_kind ON evidence (kind, at_ms);
+    CREATE INDEX IF NOT EXISTS evidence_origin ON evidence (origin, at_ms);
+    CREATE VIRTUAL TABLE IF NOT EXISTS evidence_fts USING fts5 (
+        text, meta,
+        content = '', contentless_delete = 1,
+        tokenize = 'unicode61 remove_diacritics 2'
+    );";
+
+/// Drops the raw-data tables of an older schema; they are rebuilt from the ledger.
+pub(crate) const DROP: &str = "DROP TABLE IF EXISTS evidence; DROP TABLE IF EXISTS evidence_fts;";
 
 impl Store {
     /// Loads raw data into this device's chain, in batches (E13). Items whose key is already
@@ -98,16 +123,26 @@ impl Store {
                AND (?1 IS NULL OR kind = ?1)
                AND (?2 IS NULL OR at_ms >= ?2)
                AND (?3 IS NULL OR at_ms < ?3)
+               AND (?4 IS NULL OR origin = ?4)
+               AND (?5 IS NULL OR rowid IN
+                    (SELECT rowid FROM evidence_fts WHERE evidence_fts MATCH ?5))
              ORDER BY at_ms DESC, key
-             LIMIT ?4",
+             LIMIT ?6 OFFSET ?7",
         )?;
+        let search = q.text.as_deref().and_then(match_query);
+        if q.text.is_some() && search.is_none() {
+            return Ok(Vec::new());
+        }
         let limit = q.limit.map_or(-1, |l| l as i64);
         let rows = stmt.query_map(
             params![
                 q.kind,
                 q.from_ms.map(|t| t as i64),
                 q.to_ms.map(|t| t as i64),
-                limit
+                q.origin,
+                search,
+                limit,
+                q.offset.unwrap_or(0) as i64
             ],
             |r| {
                 Ok((
@@ -130,6 +165,22 @@ impl Store {
         .collect()
     }
 
+    /// Origins with content, the largest first.
+    pub fn evidence_origins(&self) -> Result<Vec<Origin>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT origin, COUNT(*) FROM evidence
+             WHERE item IS NOT NULL AND origin IS NOT NULL
+             GROUP BY origin ORDER BY COUNT(*) DESC, origin",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(Origin {
+                origin: r.get(0)?,
+                count: r.get::<_, i64>(1)? as usize,
+            })
+        })?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
     /// Number of items with content, and of keys whose content was removed.
     pub fn evidence_count(&self) -> Result<(usize, usize)> {
         Ok(self.conn.query_row(
@@ -138,6 +189,29 @@ impl Store {
             |r| Ok((r.get::<_, i64>(0)? as usize, r.get::<_, i64>(1)? as usize)),
         )?)
     }
+}
+
+/// The user's words as an FTS5 query: each word quoted (no operators can slip in) and
+/// matched as a prefix. `None` if no word is left.
+fn match_query(text: &str) -> Option<String> {
+    let words: Vec<String> = text
+        .split_whitespace()
+        .map(|w| format!("\"{}\"*", w.replace('"', "\"\"")))
+        .collect();
+    (!words.is_empty()).then(|| words.join(" "))
+}
+
+/// What the search finds besides the text: names and ids of the people, and field values.
+fn meta_of(e: &Evidence) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for a in &e.actors {
+        parts.push(&a.name);
+        parts.push(&a.id);
+    }
+    for (_, v) in &e.fields {
+        parts.push(v);
+    }
+    parts.join(" ")
 }
 
 fn fixed<const N: usize>(b: &[u8]) -> Result<[u8; N]> {
@@ -169,19 +243,26 @@ pub(crate) fn project_evidence(tx: &Connection, change: &Change) -> Result<()> {
     };
     for (part, key) in keys.iter().enumerate() {
         let item = items.get(part);
-        tx.execute(
-            "INSERT OR IGNORE INTO evidence (key, entry, part, author, kind, at_ms, item)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        let added = tx.execute(
+            "INSERT OR IGNORE INTO evidence (key, entry, part, author, origin, kind, at_ms, item)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 key.0.as_slice(),
                 entry.0.as_slice(),
                 part as i64,
                 author.0.as_slice(),
+                item.and_then(|i| i.id.split_once(':')).map(|(o, _)| o),
                 item.map(|i| i.kind.as_str()),
                 item.map(|i| i.at_ms as i64),
                 item.map(postcard::to_allocvec).transpose()?
             ],
         )?;
+        if let (1, Some(item)) = (added, item) {
+            tx.execute(
+                "INSERT INTO evidence_fts (rowid, text, meta) VALUES (?1, ?2, ?3)",
+                params![tx.last_insert_rowid(), item.text, meta_of(item)],
+            )?;
+        }
     }
     Ok(())
 }
@@ -200,7 +281,7 @@ pub(crate) fn receive_evidence(tx: &Connection, e: &LedgerEntry) -> Result<()> {
 
 /// Fills the evidence table from the ledger, e.g. after an upgrade.
 pub(crate) fn rebuild_evidence(tx: &Connection) -> Result<()> {
-    tx.execute("DELETE FROM evidence", [])?;
+    tx.execute_batch("DELETE FROM evidence; DELETE FROM evidence_fts;")?;
     for chain in all_chains(tx)? {
         for e in &chain {
             receive_evidence(tx, e)?;
@@ -345,6 +426,119 @@ mod tests {
         // The home server loading the same message itself adds nothing.
         let r = home.record_evidence(vec![message(1, 10)]).unwrap();
         assert_eq!(r.added, 0);
+    }
+
+    fn mail(n: u32, at_ms: u64, subject: &str, text: &str) -> Evidence {
+        Evidence {
+            id: format!("mail:{n}@example.org"),
+            kind: "schema:EmailMessage".into(),
+            at_ms,
+            actors: vec![Actor {
+                id: "mailto:ben@example.org".into(),
+                role: role::FROM.into(),
+                name: "Ben Müller".into(),
+            }],
+            text: text.into(),
+            fields: vec![("subject".into(), subject.into())],
+            files: vec![],
+        }
+    }
+
+    #[test]
+    fn search_origin_and_paging() {
+        let mut s = store(1);
+        let mut items: Vec<Evidence> = (1..=5).map(|n| message(n, 100 + n as u64)).collect();
+        items.push(mail(1, 50, "Wandern am Samstag", "Hast du Lust?"));
+        items.push(mail(2, 60, "Rechnung", "Anbei die Rechnung für März."));
+        s.record_evidence(items).unwrap();
+
+        let find = |s: &Store, text: &str| {
+            s.evidence(&EvidenceQuery {
+                text: Some(text.into()),
+                ..Default::default()
+            })
+            .unwrap()
+            .into_iter()
+            .map(|e| e.evidence.id)
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            find(&s, "wand"),
+            ["mail:1@example.org"],
+            "prefix of a field"
+        );
+        assert_eq!(
+            find(&s, "muller rechnung"),
+            ["mail:2@example.org"],
+            "all words, no accents"
+        );
+        assert_eq!(find(&s, "Nachricht 3"), ["telegram:chat1/3"]);
+        assert!(find(&s, "gibtsnicht").is_empty());
+        assert!(find(&s, "   ").is_empty());
+        assert_eq!(find(&s, "\"AND OR*").len(), 0, "operators are only words");
+
+        let origins = s.evidence_origins().unwrap();
+        assert_eq!(
+            origins,
+            [
+                Origin {
+                    origin: "telegram".into(),
+                    count: 5
+                },
+                Origin {
+                    origin: "mail".into(),
+                    count: 2
+                }
+            ]
+        );
+        let page = |offset| {
+            s.evidence(&EvidenceQuery {
+                origin: Some("telegram".into()),
+                limit: Some(2),
+                offset: Some(offset),
+                ..Default::default()
+            })
+            .unwrap()
+            .into_iter()
+            .map(|e| e.evidence.at_ms)
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(page(0), [105, 104]);
+        assert_eq!(page(2), [103, 102]);
+        assert_eq!(page(4), [101]);
+
+        // A rebuild gives the same index.
+        let tx = s.conn.transaction().unwrap();
+        rebuild_evidence(&tx).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(find(&s, "wand"), ["mail:1@example.org"]);
+    }
+
+    #[test]
+    fn upgrade_from_schema_5_adds_origin_and_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("symbiot.db");
+        {
+            let mut s = Store::open(&db, Signer::from_seed([1; 32])).unwrap();
+            s.record_evidence(vec![mail(1, 10, "Wandern", "")]).unwrap();
+            // The table as schema 5 had it.
+            s.conn
+                .execute_batch(
+                    "DROP TABLE evidence; DROP TABLE evidence_fts;
+                     CREATE TABLE evidence (key BLOB PRIMARY KEY, entry BLOB NOT NULL,
+                       part INTEGER NOT NULL, author BLOB NOT NULL, kind TEXT, at_ms INTEGER,
+                       item BLOB);
+                     PRAGMA user_version = 5;",
+                )
+                .unwrap();
+        }
+        let s = Store::open(&db, Signer::from_seed([1; 32])).unwrap();
+        let q = EvidenceQuery {
+            text: Some("wandern".into()),
+            origin: Some("mail".into()),
+            ..Default::default()
+        };
+        assert_eq!(s.evidence(&q).unwrap().len(), 1);
     }
 
     #[test]
