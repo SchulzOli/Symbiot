@@ -130,13 +130,18 @@ nicht der Adapter. Der Mensch erteilt und widerruft Zugriffe als Einträge in se
 nur; was daraus eigene Knoten oder Handlungen werden, bleibt ein Vorschlag. Zuerst: Kalender, Home Assistant,
 Matrix lesend, dazu ein MCP-Server von Symbiot (nur lesen und vorschlagen).
 
+**Ergänzt durch E14:** Adapter gehören zur Integrationsschicht: Sie laden Rohdaten und deuten nichts. Aufbereiter
+sind eine zweite Art von Gerät, die aus Rohdaten Dinge ableitet. Die ersten Adapter sind Importe (M7).
+
 ## E10 — Belege von Adaptern werden Knoten · *entschieden*
 
 - **Standard:** Jeder Beleg eines Adapters wird erst durch einen Klick des Menschen zu einem Knoten.
 - **„Diesem Adapter vertrauen“:** Der Mensch kann einen Adapter als vertraut markieren. Dann werden seine
   Belege ohne Klick zu Knoten. Das ist ein Teil der Freigabe (`Grant`) in der Kette, jederzeit widerrufbar,
   und jeder so entstandene Knoten zeigt, dass er über das Vertrauen entstanden ist.
-  Bei großen Mengen schlägt E14 vor, dass Vertrauen nur das Laden von Rohdaten erlaubt.
+- **Ergänzt durch E14:** Ein vertrauter Adapter lädt Rohdaten ohne Klick, Aufbereiter leiten daraus Dinge ab
+  (Person, Gespräch, Aussage, Thema, Ort, Aktivität). In der Bedeutung (Ziele, Beziehungen, Entscheidungen)
+  entsteht ein Knoten weiter nur durch den Klick des Menschen.
 - **Abgrenzung (entschieden 2026-10-31):** Vertrauen gilt nur für das Anlegen von Knoten. Handlungen nach außen (Mail
   senden, Licht schalten) bleiben immer ein Klick, und Belege, die eine Sensibilitäts-Regel (E4) treffen,
   ebenso.
@@ -179,7 +184,7 @@ Witness, Bündel, Retention, Grant/Revoke, Geräte reserviert). **Keine Migratio
 eine v1-Datenbank wird beim Start als `symbiot.v1.db` beiseitegelegt. Noch offen: Checkpoint und Witness (M4),
 Bündel, `SetRetention`, Rollup und „Aufgeräumt“ (mit dem ersten Adapter).
 
-## E14 — Lebensgraph: Integration und Aufbereitung als ETL-Pipeline · *Vorschlag (2026-11-08), Speicher entschieden*
+## E14 — Lebensgraph: Integration und Aufbereitung als ETL-Pipeline · *entschieden (2026-11-08)*
 
 Symbiot soll ein Graph des eigenen Lebens werden und so viele Daten wie möglich verarbeiten. Dafür gibt es zwei
 getrennte Schichten: eine **Integrationsschicht**, die nur Daten hereinholt, und eine **Aufbereitungsschicht**,
@@ -281,7 +286,7 @@ nicht. Ein neuer Adapter braucht keine neue Aufbereitung, und eine neue Aufberei
 
 Fragen in Worten beantwortet die KI wie in M3: mit Quellen, deren Existenz Symbiot prüft.
 
-### Speicher: reicht SQLite? · *entschieden (2026-11-08)*
+### Speicher: reicht SQLite?
 
 Ein ganzes Leben in Daten ist grob geschätzt: Nachrichten und Mails einige Millionen, Web-Verlauf einige Millionen,
 Fotos Hunderttausende (Metadaten klein, Dateien groß), Standort- und Gesundheitswerte zig Millionen pro Jahr. Das
@@ -328,14 +333,15 @@ Drei Wege, vom einfachsten zum vollständigsten:
 - **Daten Dritter.** Nachrichten und Fotos enthalten andere Menschen. Sie sind standardmäßig nicht exportierbar
   und verlassen nie das Heimnetz. Teilen mit anderen (Phase WIR) braucht eine eigene Entscheidung.
 
-### Folgen für bestehende Entscheidungen (bei Annahme)
+### Folgen für bestehende Entscheidungen
 
 - **E7:** Adapter gehören zur Integrationsschicht und deuten nicht. Neu: Aufbereiter als zweite Art von Gerät.
 - **E8:** Neue Knotenarten sind für die abgeleiteten Dinge erlaubt (Person, Gespräch, Aussage, Thema, Ort,
   Aktivität). Für die Bedeutung bleibt E8 bestehen.
 - **E10:** Ein vertrauter Adapter lädt Rohdaten ohne Klick, Aufbereiter leiten daraus Dinge ab. In der Bedeutung
   entsteht ein Knoten weiter nur durch den Klick des Menschen.
-- **PLAN:** Für die Beispiel-Fragen bringen Nachrichten, Mail und Git mehr als Smart Home.
+- **PLAN:** Für die Beispiel-Fragen bringen Nachrichten, Mail und Git mehr als Smart Home. Die ersten Adapter
+  sind deshalb Importe (M7), Home Assistant kommt später.
 
 ### Offen
 
@@ -347,8 +353,8 @@ Drei Wege, vom einfachsten zum vollständigsten:
 
 ## E8 — Zurückgestellt · *entschieden*
 
-- **Neue Knotenarten** wie „Absicht“ oder „Gegenseite“: erst einmal nicht. Für abgeleitete Dinge schlägt E14
-  eigene Knotenarten vor.
+- **Neue Knotenarten** wie „Absicht“ oder „Gegenseite“: erst einmal nicht. Für abgeleitete Dinge sind seit E14
+  eigene Knotenarten erlaubt.
 - **iOS:** später.
 
 ## E9 — KI für M3 · *entschieden*

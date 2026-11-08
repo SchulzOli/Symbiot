@@ -62,7 +62,7 @@ Android-Build aus derselben Codebasis, signiertes APK im Release. iOS sobald ein
 ESP32-C3 mit `symbiot-core` signiert einen Beleg (z. B. Raumklima oder Schritte) und schickt ihn an den Heimserver.
 Beweis, dass „ein Gerät = eine Kette“ bis hinunter zum Mikrocontroller trägt.
 
-## Lebensgraph *(Vorschlag, E14)*
+## Lebensgraph *(E14)*
 
 Nach M6 oder parallel dazu. Zwei getrennte Schichten: Integration holt Rohdaten herein, Aufbereitung leitet daraus
 Dinge ab (ELT). Die Quellen sind Beispiele, jede ist ein eigener Adapter.
