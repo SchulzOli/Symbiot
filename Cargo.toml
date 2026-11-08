@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/symbiot-core", "crates/symbiot-store", "crates/symbiot-ai", "crates/symbiot-sync", "apps/server", "apps/ui", "apps/desktop"]
+members = ["crates/symbiot-core", "crates/symbiot-store", "crates/symbiot-ai", "crates/symbiot-sync", "crates/symbiot-import", "apps/server", "apps/ui", "apps/desktop"]
 
 [workspace.package]
 version = "0.3.0"
