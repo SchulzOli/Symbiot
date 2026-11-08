@@ -107,16 +107,13 @@ jobs:
           key: android
       - uses: taiki-e/install-action@v2
         with:
-          tool: trunk@0.22.1
+          tool: trunk@0.22.1,tauri-cli@2
       - name: Cache trunk tools (wasm-bindgen, wasm-opt)
         uses: actions/cache@v4
         with:
           path: ~/.cache/trunk
           key: trunk-tools-${{ runner.os }}-0.22.1-${{ hashFiles('Cargo.lock', 'apps/ui/Trunk.toml') }}
           restore-keys: trunk-tools-${{ runner.os }}-0.22.1-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
       # Pull requests get a throwaway key: the APK installs for testing, but cannot update a
       # release build. Releases are signed with the real key (release.yml).
       - name: Test key

@@ -86,11 +86,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         if: steps.key.outputs.present == 'true'
         with:
-          tool: trunk@0.22.1
-      - uses: actions/setup-node@v4
-        if: steps.key.outputs.present == 'true'
-        with:
-          node-version: 24
+          tool: trunk@0.22.1,tauri-cli@2
       - name: Build and sign APK
         if: steps.key.outputs.present == 'true'
         env:

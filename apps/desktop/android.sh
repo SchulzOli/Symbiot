@@ -4,7 +4,8 @@
 #   apps/desktop/android.sh OUT.apk
 #
 # Needs the Android SDK and NDK (ANDROID_HOME, NDK_HOME or ANDROID_NDK_LATEST_HOME as on GitHub
-# runners), Java 17, Node, trunk and the Rust target aarch64-linux-android. The Gradle project in
+# runners), Java 17, trunk, the Tauri CLI as `cargo tauri` (Gradle calls it back the same way it
+# was started) and the Rust target aarch64-linux-android. The Gradle project in
 # gen/android is generated, not committed (like the rest of gen/). The APK is built for arm64
 # (nearly every phone since 2017) and signed with the keystore in ANDROID_KEYSTORE (a file),
 # ANDROID_KEYSTORE_PASSWORD and ANDROID_KEY_ALIAS.
@@ -18,7 +19,7 @@ out="$(realpath -m "${1:?Aufruf: android.sh OUT.apk}")"
 export NDK_HOME="${NDK_HOME:-${ANDROID_NDK_LATEST_HOME:?NDK_HOME fehlt}}"
 
 cd "$(dirname "$0")"
-tauri() { npx --yes @tauri-apps/cli@2 "$@"; }
+tauri() { cargo tauri "$@"; }
 
 if [ ! -d gen/android ]; then
   tauri android init --ci
