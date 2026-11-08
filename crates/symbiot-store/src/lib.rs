@@ -24,11 +24,13 @@ use symbiot_core::{
 /// 8: `evidence_actor` (identifiers per item) and `identity_decision` (#31); rebuilt.
 const SCHEMA_VERSION: i64 = 8;
 
+mod actions;
 mod evidence;
 mod files;
 mod persons;
 mod sync;
 
+pub use actions::{Executed, Outcome};
 pub use evidence::{EvidenceQuery, Origin, Recorded, StoredEvidence};
 pub use files::{FileInfo, MAX_FILE_BYTES};
 pub use persons::{Identifier, Person, Suggestion};
@@ -73,6 +75,9 @@ pub enum Error {
     /// The file store (#28): a file could not be read or written, or does not match its hash.
     #[error("Dateien: {0}")]
     Files(String),
+    /// E16: a suggestion that cannot be carried out as it is.
+    #[error("Vorschlag: {0}")]
+    Suggestion(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -501,7 +506,8 @@ fn append_in(tx: &Connection, signer: &Signer, op: Op) -> Result<Change> {
         | Op::AddSensitivityRule { .. }
         | Op::RemoveSensitivityRule { .. }
         | Op::RecordEvidence { .. }
-        | Op::DecideIdentity { .. } => vec![],
+        | Op::DecideIdentity { .. }
+        | Op::DecideSuggestion { .. } => vec![],
         Op::UpdateNode { node, .. }
         | Op::MarkSensitive { node, .. }
         | Op::DeleteNode { node }
@@ -613,7 +619,7 @@ fn project(tx: &Connection, change: &Change) -> Result<()> {
             write_edge(tx, edge)?;
             refresh_sensitive(tx, Some(node))?;
         }
-        Change::Rejected | Change::Device => {}
+        Change::Rejected | Change::Device | Change::Suggestion { .. } => {}
         Change::Evidence { .. } => evidence::project_evidence(tx, change)?,
         Change::Identity { .. } => persons::project_identity(tx, change)?,
         Change::Sensitivity { node, sensitive } => {

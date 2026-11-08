@@ -383,6 +383,62 @@ pub async fn list_evidence(filter: EvidenceFilter) -> ApiResult<Vec<StoredEviden
     http_json(gloo_net::http::Request::get(&url).build()).await
 }
 
+/// E16: what became of an accepted suggestion.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+pub struct Outcome {
+    pub executed: Vec<Executed>,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct Executed {
+    pub index: usize,
+    pub node: Option<NodeId>,
+}
+
+/// E16: the human's request in words; the AI answers with a suggestion of actions.
+pub async fn assist(
+    instruction: String,
+    remote: bool,
+) -> ApiResult<symbiot_core::action::Suggestion> {
+    #[derive(Serialize)]
+    struct Args {
+        instruction: String,
+        remote: bool,
+    }
+    let args = Args {
+        instruction,
+        remote,
+    };
+    if tauri_invoke_fn().is_some() {
+        return invoke("assist", &args).await;
+    }
+    http_json(gloo_net::http::Request::post("/api/assist").json(&args)).await
+}
+
+/// E16: the human decides; `chosen` are the indexes of the actions to carry out.
+pub async fn decide_suggestion(
+    suggestion: symbiot_core::action::Suggestion,
+    accept: bool,
+    chosen: Vec<usize>,
+) -> ApiResult<Outcome> {
+    #[derive(Serialize)]
+    struct Args {
+        suggestion: symbiot_core::action::Suggestion,
+        accept: bool,
+        chosen: Vec<usize>,
+    }
+    let args = Args {
+        suggestion,
+        accept,
+        chosen,
+    };
+    if tauri_invoke_fn().is_some() {
+        return invoke("decide_suggestion", &args).await;
+    }
+    http_json(gloo_net::http::Request::post("/api/suggestions/decide").json(&args)).await
+}
+
 /// #31: one identifier of a person.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct Identifier {

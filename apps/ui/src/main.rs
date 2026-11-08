@@ -5,6 +5,7 @@
 //! region for results, shortcuts listed in the tooltips).
 
 mod api;
+mod assistant;
 mod canvas;
 mod detail;
 mod devices;
@@ -72,6 +73,8 @@ impl Mode {
 /// Which side panel is open, besides the node detail.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Panel {
+    /// E16: say what should happen, get a suggestion of actions.
+    Assistant,
     Rules,
     Devices,
 }
@@ -155,6 +158,9 @@ fn App() -> impl IntoView {
         if let Some(m) = Mode::ALL.into_iter().find(|m| m.key() == ev.key()) {
             mode.set(m);
             ev.prevent_default();
+        } else if ev.key() == "a" || ev.key() == "A" {
+            panel.set(Some(Panel::Assistant));
+            ev.prevent_default();
         } else if (ev.key() == "n" || ev.key() == "N")
             && let Some(input) = title_input.get_untracked()
         {
@@ -174,6 +180,12 @@ fn App() -> impl IntoView {
                     <span class="tagline">"Die KI schlägt vor, du entscheidest."</span>
                 </div>
                 <div class="toolbar" role="toolbar" aria-label="Werkzeuge">
+                    <button class="icon-btn" aria-label="Assistent" data-tip="Assistent (A)"
+                        aria-keyshortcuts="A"
+                        aria-pressed=move || (panel.get() == Some(Panel::Assistant)).to_string()
+                        on:click=move |_| toggle(Panel::Assistant)>
+                        <Svg icon=Icon::Sparkles />
+                    </button>
                     <Verify refresh=version />
                     <button class="icon-btn" aria-label="Regeln für Sensibles" data-tip="Regeln für Sensibles"
                         aria-pressed=move || (panel.get() == Some(Panel::Rules)).to_string()
@@ -251,6 +263,11 @@ fn App() -> impl IntoView {
                 let node = selected.get().and_then(|id| nodes.iter().find(|n| n.id == id).cloned())?;
                 let is_sensitive = sensitive.contains(&node.id);
                 Some(view! { <detail::Detail node nodes=nodes.clone() edges sensitive=is_sensitive selected on_saved=saved refresh=version /> })
+            })}
+            {move || (panel.get() == Some(Panel::Assistant)).then(|| view! {
+                <Sheet label="Assistent" close=move || panel.set(None)>
+                    <assistant::Assistant on_saved=saved />
+                </Sheet>
             })}
             {move || (panel.get() == Some(Panel::Rules)).then(|| view! {
                 <Sheet label="Regeln für Sensibles" close=move || panel.set(None)>

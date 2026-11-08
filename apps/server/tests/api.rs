@@ -48,6 +48,25 @@ impl Advisor for FakeAi {
         })
     }
 
+    /// E16: creates „Laufschuhe kaufen“ and links it to the first node it was shown.
+    fn assist(
+        &self,
+        ctx: &symbiot_ai::AssistContext,
+    ) -> Result<symbiot_core::action::Suggestion, symbiot_ai::Error> {
+        let first = ctx
+            .nodes
+            .last()
+            .map(|n| n.id)
+            .ok_or(symbiot_ai::Error::NoSources)?;
+        let reply = format!(
+            r#"{{"title": "Schritt anlegen", "reason": "{}", "actions": [
+                {{"create_node": {{"kind": "goal", "title": "Laufschuhe kaufen"}}}},
+                {{"link": {{"from": "$0", "to": "{first}", "kind": "derives_from"}}}}]}}"#,
+            ctx.instruction
+        );
+        symbiot_ai::parse_assist(&reply, ctx, "fake")
+    }
+
     /// Suggests „Gesundheit“ for every node that mentions a doctor.
     fn suggest_rules(&self, ctx: &RuleContext) -> Result<Vec<RuleProposal>, symbiot_ai::Error> {
         let reply = r#"{"rules": [{"label": "Gesundheit", "keywords": ["arzt", "befund"]}]}"#;
@@ -725,4 +744,78 @@ async fn persons_merge_and_timeline() {
     assert_eq!(status, StatusCode::NO_CONTENT);
     let (_, items) = call(&app, "GET", "/api/evidence?person=name:Anna", None).await;
     assert_eq!(items.as_array().unwrap().len(), 1);
+}
+
+/// E16: a request in words becomes a suggestion; only the human's decision changes anything.
+#[tokio::test]
+async fn assist_suggests_and_the_human_decides() {
+    let (app, _) = app_with_ai();
+    let (_, goal) = call(
+        &app,
+        "POST",
+        "/api/nodes",
+        Some(json!({"kind": "goal", "title": "Laufen"})),
+    )
+    .await;
+    let (status, sug) = call(
+        &app,
+        "POST",
+        "/api/assist",
+        Some(json!({"instruction": "Leg einen Schritt an"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(sug["actions"].as_array().unwrap().len(), 2);
+    assert_eq!(sug["sources"][0], goal["id"]);
+    let (_, nodes) = call(&app, "GET", "/api/nodes", None).await;
+    assert_eq!(
+        nodes.as_array().unwrap().len(),
+        1,
+        "a suggestion changes nothing"
+    );
+
+    let (_, out) = call(
+        &app,
+        "POST",
+        "/api/suggestions/decide",
+        Some(json!({"suggestion": sug, "accept": true, "chosen": [0, 1]})),
+    )
+    .await;
+    assert_eq!(out["executed"].as_array().unwrap().len(), 2);
+    assert_eq!(out["error"], Value::Null);
+    let (_, edges) = call(&app, "GET", "/api/edges", None).await;
+    assert_eq!(edges[0]["kind"], "derives_from");
+
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/api/suggestions/decide",
+        Some(json!({"suggestion": sug, "accept": true, "chosen": [1]})),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "the link needs the node of action 1"
+    );
+
+    let (_, out) = call(
+        &app,
+        "POST",
+        "/api/suggestions/decide",
+        Some(json!({"suggestion": sug, "accept": false})),
+    )
+    .await;
+    assert_eq!(out["executed"].as_array().unwrap().len(), 0);
+    let (_, nodes) = call(&app, "GET", "/api/nodes", None).await;
+    assert_eq!(nodes.as_array().unwrap().len(), 2);
+
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/api/assist",
+        Some(json!({"instruction": "  "})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }

@@ -395,6 +395,22 @@ und zwar für **jede** Handlung, nicht nur für „nächster Schritt“ und „R
 - **Grenzen bleiben:** Sensible Inhalte gehen nur an das lokale Modell (E4), Texte von außen sind Daten und nie
   Auftrag (E12), Handlungen nach außen brauchen immer den Klick (E10).
 
+**Umgesetzt (2026-11-08, #42):**
+- `symbiot_core::action`: `Action` (Knoten anlegen, ändern, verbinden, lösen, löschen, sensibel, Richtlinie, Regeln,
+  Personen zusammenführen, trennen, auseinanderhalten), `Target` (Knoten-Id oder `$n` für den Knoten einer
+  früheren Aktion), `Suggestion` mit Prüfung, `CATALOG` für Prompt und künftige MCP-Werkzeuge.
+- Eintragsart 28 `DecideSuggestion`: angenommen oder abgelehnt, welche Aktionen ausgeführt wurden, der Vorschlag
+  als entfernbarer Inhalt. Die ausgeführten Aktionen stehen direkt davor als eigene Einträge.
+- `Store::decide_suggestion`: führt die gewählten Aktionen der Reihe nach aus, hält beim ersten Fehler an und
+  schreibt in die Kette nur, was wirklich geschah.
+- **Assistent** (Kopfleiste, Taste A): Auftrag in eigenen Worten, Vorschlag als Liste von Aktionen mit Häkchen.
+  Abhängige Aktionen werden mitgewählt bzw. mit abgewählt. Annehmen führt aus, Ablehnen ändert nichts; beides
+  steht in der Kette. Die KI-Antwort wird geprüft: erfundene IDs und Verweise auf nicht angelegte Knoten lassen
+  den ganzen Vorschlag durchfallen.
+- **Bewusst nicht enthalten:** Personen-Schlüssel und Geräte (die 24 Wörter erreichen nie eine KI), Importe.
+- Noch offen: Vorschläge als Karte im Canvas, derselbe Katalog als MCP-Werkzeuge (#25), die Oberfläche selbst
+  über dieselben Aktionen statt über eigene Aufrufe.
+
 ## E17 — Langflow für die Pipelines? · *Vorschlag (2026-11-08): nein*
 
 Geprüft auf Wunsch des Besitzers, ob Langflow (visueller Baukasten für LLM-Abläufe) die Pipelines aus E14 bauen

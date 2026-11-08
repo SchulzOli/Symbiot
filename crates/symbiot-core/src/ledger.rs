@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::PROTOCOL_VERSION;
+use crate::action::Suggestion;
 use crate::bytes::{Blob, EdgeId, Hash, NodeId, PubKey, RuleId, Salt, Sig};
 use crate::edge::EdgeKind;
 use crate::evidence::Evidence;
@@ -119,6 +120,15 @@ pub enum Op {
     DecideIdentity {
         decision: Decision,
     },
+    /// E16: the human accepted (some of) or rejected a suggestion of the AI. `chosen` are the
+    /// indexes of the actions that were carried out; they come right before, as entries of
+    /// their own.
+    /// The suggestion is content (removable); the head keeps the decision and the model.
+    DecideSuggestion {
+        accepted: bool,
+        chosen: Vec<u32>,
+        suggestion: Suggestion,
+    },
 }
 
 fn enc<T: Serialize + ?Sized>(v: &T) -> Vec<u8> {
@@ -204,6 +214,15 @@ impl Op {
                 None,
             ),
             Op::RemoveSensitivityRule { rule } => (kind::REMOVE_SENSITIVITY_RULE, enc(rule), None),
+            Op::DecideSuggestion {
+                accepted,
+                chosen,
+                suggestion,
+            } => (
+                kind::DECIDE_SUGGESTION,
+                enc(&(accepted, chosen, &suggestion.model)),
+                Some(enc(suggestion)),
+            ),
             Op::DecideIdentity { decision } => {
                 let tag: u8 = match decision {
                     Decision::Merge { .. } => 1,
@@ -423,6 +442,17 @@ impl LedgerEntry {
                     Some(_) => return Err(Decode::Malformed),
                 };
                 Op::RecordEvidence { items }
+            }
+            kind::DECIDE_SUGGESTION => {
+                let (accepted, chosen, _model): (bool, Vec<u32>, String) = dec(p)?;
+                match self.content.as_deref() {
+                    Some([part]) => Op::DecideSuggestion {
+                        accepted,
+                        chosen,
+                        suggestion: dec(&part.data.0)?,
+                    },
+                    _ => return Err(Decode::Malformed),
+                }
             }
             // A decision whose content was removed no longer says anything: it is skipped.
             kind::DECIDE_IDENTITY => match self.content.as_deref() {

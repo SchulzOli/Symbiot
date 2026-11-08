@@ -188,6 +188,12 @@ pub enum Change {
         keys: Vec<Hash>,
         items: Vec<Evidence>,
     },
+    /// E16: a decision on a suggestion of the AI. Nothing changes by the decision itself; the
+    /// chosen actions come right before it, as entries of their own.
+    Suggestion {
+        entry: Hash,
+        accepted: bool,
+    },
     /// #31: a decision about identifiers. Nothing changes in the graph.
     Identity {
         entry: Hash,
@@ -341,6 +347,10 @@ impl Change {
                 view.edge(edge).ok_or(ApplyError::UnknownEdge(*edge))?;
                 Ok(Change::Unlinked(*edge))
             }
+            Op::DecideSuggestion { accepted, .. } => Ok(Change::Suggestion {
+                entry: e.hash,
+                accepted: *accepted,
+            }),
             Op::DecideIdentity { decision } => {
                 decision.check().map_err(|_| ApplyError::BadIdentity)?;
                 Ok(Change::Identity {
@@ -558,7 +568,7 @@ impl State {
                 self.edges.insert(edge.id, edge.clone());
                 self.refresh_sensitive(&node.id);
             }
-            Change::Rejected | Change::Device => {}
+            Change::Rejected | Change::Device | Change::Suggestion { .. } => {}
             Change::Evidence { keys, .. } => {
                 self.evidence.extend(keys.iter().copied());
             }

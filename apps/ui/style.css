@@ -500,3 +500,14 @@ button.link {
 
 .banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .banner span { flex: 1; min-width: 200px; }
+
+/* E16: assistant */
+.assistant, .assist-form { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); }
+.field { display: grid; gap: 4px; }
+.suggestion-card { display: grid; gap: 8px; border-style: dashed; }
+.suggestion-card h3 { margin: 0; font-size: 1rem; }
+.suggestion-card p { margin: 0; }
+.suggestion-card fieldset { border: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.suggestion-card legend { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 4px; }
+.action-line { display: flex; gap: 8px; align-items: flex-start; overflow-wrap: anywhere; }
+.action-line input { margin-top: 4px; }

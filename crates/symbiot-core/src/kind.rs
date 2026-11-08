@@ -29,3 +29,6 @@ pub const ROLLUP: u16 = 26;
 
 // E14, M8: the human's decisions about which identifiers are one person (#31).
 pub const DECIDE_IDENTITY: u16 = 27;
+
+// E16: the human's decision on a suggestion of the AI (#42).
+pub const DECIDE_SUGGESTION: u16 = 28;
