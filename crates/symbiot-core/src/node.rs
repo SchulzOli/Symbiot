@@ -14,6 +14,7 @@ use crate::identity::Decision;
 use crate::ledger::{Decode, LedgerEntry, Op};
 use crate::proposal::Proposal;
 use crate::rule::{self, Rule};
+use crate::source::{self, Grant};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -121,6 +122,8 @@ pub enum ApplyError {
     BadEvidence,
     /// #31: a merge of fewer than two identifiers, or an identifier without scheme.
     BadIdentity,
+    /// #44: a source name or what it leaves out breaks the rules.
+    BadSource,
 }
 
 impl fmt::Display for ApplyError {
@@ -140,6 +143,7 @@ impl fmt::Display for ApplyError {
             ApplyError::EmptyTitle => f.write_str("Titel darf nicht leer sein"),
             ApplyError::Undecodable(d) => write!(f, "Eintrag nicht lesbar: {d}"),
             ApplyError::BadEvidence => f.write_str("Rohdaten verletzen das Format (E14)"),
+            ApplyError::BadSource => f.write_str("Quelle oder Auswahl ungültig"),
             ApplyError::BadIdentity => f.write_str(
                 "Zusammenführen braucht zwei verschiedene Kennungen mit Schema (z. B. mailto:)",
             ),
@@ -185,8 +189,23 @@ pub enum Change {
     Evidence {
         entry: Hash,
         author: PubKey,
+        /// When the batch was loaded (the entry's time).
+        ts_ms: u64,
         keys: Vec<Hash>,
         items: Vec<Evidence>,
+    },
+    /// E16: a decision on a suggestion of the AI. Nothing changes by the decision itself; the
+    /// chosen actions come right before it, as entries of their own.
+    Suggestion {
+        entry: Hash,
+        accepted: bool,
+    },
+    /// #44: how a source's raw data is used; `None` revokes it. Nothing changes in the graph.
+    Source {
+        entry: Hash,
+        ts_ms: u64,
+        source: String,
+        grant: Option<Grant>,
     },
     /// #31: a decision about identifiers. Nothing changes in the graph.
     Identity {
@@ -341,6 +360,32 @@ impl Change {
                 view.edge(edge).ok_or(ApplyError::UnknownEdge(*edge))?;
                 Ok(Change::Unlinked(*edge))
             }
+            Op::DecideSuggestion { accepted, .. } => Ok(Change::Suggestion {
+                entry: e.hash,
+                accepted: *accepted,
+            }),
+            Op::GrantSource { source, grant } => {
+                if !source::valid_source(source) || !grant.valid() {
+                    return Err(ApplyError::BadSource);
+                }
+                Ok(Change::Source {
+                    entry: e.hash,
+                    ts_ms: e.head.ts_ms,
+                    source: source.clone(),
+                    grant: Some(grant.clone()),
+                })
+            }
+            Op::RevokeSource { source } => {
+                if !source::valid_source(source) {
+                    return Err(ApplyError::BadSource);
+                }
+                Ok(Change::Source {
+                    entry: e.hash,
+                    ts_ms: e.head.ts_ms,
+                    source: source.clone(),
+                    grant: None,
+                })
+            }
             Op::DecideIdentity { decision } => {
                 decision.check().map_err(|_| ApplyError::BadIdentity)?;
                 Ok(Change::Identity {
@@ -354,6 +399,7 @@ impl Change {
                 Ok(Change::Evidence {
                     entry: e.hash,
                     author,
+                    ts_ms: e.head.ts_ms,
                     keys,
                     items: items.clone(),
                 })
@@ -498,6 +544,9 @@ pub struct State {
     pub evidence: BTreeSet<Hash>,
     /// #31: decisions about identifiers, in the order they apply.
     pub identity: Vec<(Hash, Decision)>,
+    /// #44: decisions about sources (entry, time, source, grant or `None` = revoked), in the
+    /// order they apply.
+    pub sources: Vec<(Hash, u64, String, Option<Grant>)>,
 }
 
 impl Lookup for State {
@@ -558,12 +607,21 @@ impl State {
                 self.edges.insert(edge.id, edge.clone());
                 self.refresh_sensitive(&node.id);
             }
-            Change::Rejected | Change::Device => {}
+            Change::Rejected | Change::Device | Change::Suggestion { .. } => {}
             Change::Evidence { keys, .. } => {
                 self.evidence.extend(keys.iter().copied());
             }
             Change::Identity { entry, decision } => {
                 self.identity.push((*entry, decision.clone()));
+            }
+            Change::Source {
+                entry,
+                ts_ms,
+                source,
+                grant,
+            } => {
+                self.sources
+                    .push((*entry, *ts_ms, source.clone(), grant.clone()));
             }
             Change::Sensitivity { node, sensitive } => {
                 self.by_hand.insert(*node, *sensitive);

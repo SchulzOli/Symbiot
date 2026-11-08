@@ -135,6 +135,37 @@ async fn propose_next(
         .map_err(|e| e.to_string())
 }
 
+/// E16: the human's request becomes a suggestion of actions. Nothing is written.
+#[tauri::command]
+async fn assist(
+    store: State<'_, AppStore>,
+    ai: State<'_, Ai>,
+    instruction: String,
+    remote: bool,
+) -> Result<symbiot_core::action::Suggestion, String> {
+    let advisor =
+        ai.0.clone()
+            .ok_or_else(|| symbiot_ai::Error::NotConfigured.to_string())?;
+    let (nodes, edges, rules, home_only) =
+        store.with(|s| Ok((s.nodes(None)?, s.edges()?, s.rules()?, s.home_only_nodes()?)))?;
+    let ctx = symbiot_ai::assist_context(&instruction, &nodes, &edges, &rules, &home_only, remote);
+    tauri::async_runtime::spawn_blocking(move || advisor.assist(&ctx))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+/// E16: the human decides on a suggestion.
+#[tauri::command]
+fn decide_suggestion(
+    store: State<AppStore>,
+    suggestion: symbiot_core::action::Suggestion,
+    accept: bool,
+    chosen: Vec<usize>,
+) -> Result<symbiot_store::Outcome, String> {
+    store.with(|s| s.decide_suggestion(suggestion, accept, &chosen))
+}
+
 #[derive(serde::Serialize)]
 struct Accepted {
     node: Node,
@@ -247,6 +278,25 @@ fn split_identity(store: State<AppStore>, id: String) -> Result<(), String> {
 #[tauri::command]
 fn keep_apart(store: State<AppStore>, a: String, b: String) -> Result<(), String> {
     store.with(|s| s.keep_apart(&a, &b))
+}
+
+#[tauri::command]
+fn list_sources(store: State<AppStore>) -> Result<Vec<symbiot_store::SourceInfo>, String> {
+    store.with(|s| s.sources())
+}
+
+#[tauri::command]
+fn grant_source(
+    store: State<AppStore>,
+    source: String,
+    grant: symbiot_core::source::Grant,
+) -> Result<(), String> {
+    store.with(|s| s.grant_source(&source, grant))
+}
+
+#[tauri::command]
+fn revoke_source(store: State<AppStore>, source: String) -> Result<usize, String> {
+    store.with(|s| s.revoke_source(&source))
 }
 
 /// Pictures up to this size are shown in the app (#28); larger ones only by name.
@@ -565,7 +615,12 @@ pub fn run() {
             person_suggestions,
             merge_identities,
             split_identity,
-            keep_apart
+            keep_apart,
+            list_sources,
+            grant_source,
+            revoke_source,
+            assist,
+            decide_suggestion
         ])
         .run(tauri::generate_context!())
         .expect("error while running Symbiot");

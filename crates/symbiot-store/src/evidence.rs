@@ -11,6 +11,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use symbiot_core::evidence::{self, Evidence};
 use symbiot_core::{Change, Hash, LedgerEntry, Op, PubKey, kind};
 
+use crate::sources::USED;
 use crate::{Error, Known, Result, Store, all_chains, append_in};
 
 /// What [`Store::record_evidence`] did.
@@ -73,7 +74,10 @@ pub(crate) const SCHEMA: &str = "
         origin TEXT,
         kind   TEXT,
         at_ms  INTEGER,
-        item   BLOB
+        item   BLOB,
+        -- #44: the chat or repository, and when the batch was loaded.
+        scope     TEXT,
+        loaded_ms INTEGER
     );
     CREATE INDEX IF NOT EXISTS evidence_time ON evidence (at_ms);
     CREATE INDEX IF NOT EXISTS evidence_kind ON evidence (kind, at_ms);
@@ -135,9 +139,9 @@ impl Store {
 
     /// Evidence that still has its content, newest first.
     pub fn evidence(&self, q: &EvidenceQuery) -> Result<Vec<StoredEvidence>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT key, entry, author, item FROM evidence
-             WHERE item IS NOT NULL
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT key, entry, author, item FROM evidence AS e
+             WHERE item IS NOT NULL AND {USED}
                AND (?1 IS NULL OR kind = ?1)
                AND (?2 IS NULL OR at_ms >= ?2)
                AND (?3 IS NULL OR at_ms < ?3)
@@ -148,8 +152,8 @@ impl Store {
                     (SELECT key FROM evidence_actor
                      WHERE actor IN (SELECT value FROM json_each(?8))))
              ORDER BY at_ms DESC, key
-             LIMIT ?6 OFFSET ?7",
-        )?;
+             LIMIT ?6 OFFSET ?7"
+        ))?;
         let search = q.text.as_deref().and_then(match_query);
         if q.text.is_some() && search.is_none() {
             return Ok(Vec::new());
@@ -187,13 +191,13 @@ impl Store {
         .collect()
     }
 
-    /// Origins with content, the largest first.
+    /// Origins with content that is used (#44), the largest first.
     pub fn evidence_origins(&self) -> Result<Vec<Origin>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT origin, COUNT(*) FROM evidence
-             WHERE item IS NOT NULL AND origin IS NOT NULL
-             GROUP BY origin ORDER BY COUNT(*) DESC, origin",
-        )?;
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT origin, COUNT(*) FROM evidence AS e
+             WHERE item IS NOT NULL AND origin IS NOT NULL AND {USED}
+             GROUP BY origin ORDER BY COUNT(*) DESC, origin"
+        ))?;
         let rows = stmt.query_map([], |r| {
             Ok(Origin {
                 origin: r.get(0)?,
@@ -279,6 +283,7 @@ pub(crate) fn project_evidence(tx: &Connection, change: &Change) -> Result<()> {
     let Change::Evidence {
         entry,
         author,
+        ts_ms,
         keys,
         items,
     } = change
@@ -288,8 +293,9 @@ pub(crate) fn project_evidence(tx: &Connection, change: &Change) -> Result<()> {
     for (part, key) in keys.iter().enumerate() {
         let item = items.get(part);
         let added = tx.execute(
-            "INSERT OR IGNORE INTO evidence (key, entry, part, author, origin, kind, at_ms, item)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT OR IGNORE INTO evidence
+                 (key, entry, part, author, origin, kind, at_ms, item, scope, loaded_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 key.0.as_slice(),
                 entry.0.as_slice(),
@@ -298,7 +304,9 @@ pub(crate) fn project_evidence(tx: &Connection, change: &Change) -> Result<()> {
                 item.and_then(|i| i.id.split_once(':')).map(|(o, _)| o),
                 item.map(|i| i.kind.as_str()),
                 item.map(|i| i.at_ms as i64),
-                item.map(postcard::to_allocvec).transpose()?
+                item.map(postcard::to_allocvec).transpose()?,
+                item.and_then(symbiot_core::source::scope_of),
+                *ts_ms as i64
             ],
         )?;
         if let (1, Some(item)) = (added, item) {

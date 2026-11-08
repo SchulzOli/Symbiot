@@ -14,13 +14,15 @@ use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use symbiot_ai::Advisor;
+use symbiot_core::action::Suggestion;
+use symbiot_core::source::Grant;
 use symbiot_core::{
     Edge, EdgeId, EdgeKind, Hash, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal, PubKey,
     Rule, RuleId,
 };
 use symbiot_store::{
-    ChainHead, DeviceInfo, EvidenceQuery, Origin, Person, Sensitivity as NodeSensitivity, Store,
-    StoredEvidence, Suggestion, VerifyReport,
+    ChainHead, DeviceInfo, EvidenceQuery, Origin, Outcome, Person, Sensitivity as NodeSensitivity,
+    SourceInfo, Store, StoredEvidence, Suggestion as PersonSuggestion, VerifyReport,
 };
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
@@ -62,6 +64,8 @@ pub fn app(store: Store, ui_dir: Option<PathBuf>, ai: Option<Arc<dyn Advisor>>) 
         .route("/proposals/accept", post(accept_proposal))
         .route("/proposals/reject", post(reject_proposal))
         .route("/ai", get(ai_info))
+        .route("/assist", post(assist))
+        .route("/suggestions/decide", post(decide_suggestion))
         .route("/edges", get(list_edges).post(create_edge))
         .route("/edges/{id}", delete(unlink))
         .route("/evidence", get(list_evidence))
@@ -71,6 +75,9 @@ pub fn app(store: Store, ui_dir: Option<PathBuf>, ai: Option<Arc<dyn Advisor>>) 
         .route("/persons/merge", post(merge_persons))
         .route("/persons/split", post(split_person))
         .route("/persons/apart", post(keep_apart))
+        .route("/sources", get(list_sources))
+        .route("/sources/grant", post(grant_source))
+        .route("/sources/revoke", post(revoke_source))
         .route("/ledger", get(ledger))
         .route("/ledger/verify", get(verify))
         .route("/ledger/verify-all", get(verify_all))
@@ -175,7 +182,9 @@ async fn list_persons(State(s): State<Shared>) -> Result<Json<Vec<Person>>, ApiE
     Ok(Json(lock(&s).persons()?))
 }
 
-async fn person_suggestions(State(s): State<Shared>) -> Result<Json<Vec<Suggestion>>, ApiError> {
+async fn person_suggestions(
+    State(s): State<Shared>,
+) -> Result<Json<Vec<PersonSuggestion>>, ApiError> {
     Ok(Json(lock(&s).person_suggestions()?))
 }
 
@@ -221,6 +230,43 @@ async fn keep_apart(
 ) -> Result<StatusCode, ApiError> {
     lock(&s).keep_apart(&r.a, &r.b)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn list_sources(State(s): State<Shared>) -> Result<Json<Vec<SourceInfo>>, ApiError> {
+    Ok(Json(lock(&s).sources()?))
+}
+
+#[derive(Deserialize)]
+pub struct GrantRequest {
+    pub source: String,
+    pub grant: Grant,
+}
+
+async fn grant_source(
+    State(s): State<Shared>,
+    Json(r): Json<GrantRequest>,
+) -> Result<StatusCode, ApiError> {
+    lock(&s).grant_source(&r.source, r.grant)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct RevokeSourceRequest {
+    pub source: String,
+}
+
+#[derive(Serialize)]
+pub struct Revoked {
+    /// Items whose raw data was removed here.
+    pub removed: usize,
+}
+
+async fn revoke_source(
+    State(s): State<Shared>,
+    Json(r): Json<RevokeSourceRequest>,
+) -> Result<Json<Revoked>, ApiError> {
+    let removed = lock(&s).revoke_source(&r.source)?;
+    Ok(Json(Revoked { removed }))
 }
 
 async fn evidence_origins(State(s): State<Shared>) -> Result<Json<Vec<Origin>>, ApiError> {
@@ -474,6 +520,64 @@ async fn propose(
     // Only metadata in the log: what the AI said stays in the app.
     tracing::info!(%goal, model = %proposal.model, sources = proposal.sources.len(), withheld, "proposal made");
     Ok(Json(proposal))
+}
+
+#[derive(Deserialize)]
+pub struct AssistRequest {
+    pub instruction: String,
+    #[serde(default)]
+    pub remote: bool,
+}
+
+/// E16: the human's request becomes a suggestion of actions. Nothing is written.
+async fn assist(
+    State(s): State<Shared>,
+    Json(r): Json<AssistRequest>,
+) -> Result<Json<Suggestion>, ApiError> {
+    if r.instruction.trim().is_empty() {
+        return Err(ApiError::bad("Was soll geschehen?"));
+    }
+    let ai = s.ai.clone().ok_or(symbiot_ai::Error::NotConfigured)?;
+    let ctx = {
+        let store = lock(&s);
+        let (nodes, edges, rules, home_only) = (
+            store.nodes(None)?,
+            store.edges()?,
+            store.rules()?,
+            store.home_only_nodes()?,
+        );
+        symbiot_ai::assist_context(&r.instruction, &nodes, &edges, &rules, &home_only, r.remote)
+    };
+    let withheld = ctx.withheld;
+    let suggestion = tokio::task::spawn_blocking(move || ai.assist(&ctx))
+        .await
+        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "interner Fehler".into()))??;
+    // Only metadata in the log: neither the request nor the answer.
+    tracing::info!(model = %suggestion.model, actions = suggestion.actions.len(), withheld, "suggestion made");
+    Ok(Json(suggestion))
+}
+
+#[derive(Deserialize)]
+pub struct DecideRequest {
+    pub suggestion: Suggestion,
+    pub accept: bool,
+    #[serde(default)]
+    pub chosen: Vec<usize>,
+}
+
+/// E16: the human decides. Accepted actions are carried out, the decision is signed.
+async fn decide_suggestion(
+    State(s): State<Shared>,
+    Json(d): Json<DecideRequest>,
+) -> Result<Json<Outcome>, ApiError> {
+    let out = lock(&s).decide_suggestion(d.suggestion, d.accept, &d.chosen)?;
+    tracing::info!(
+        accept = d.accept,
+        executed = out.executed.len(),
+        failed = out.error.is_some(),
+        "suggestion decided"
+    );
+    Ok(Json(out))
 }
 
 #[derive(Serialize)]
@@ -808,7 +912,9 @@ impl From<symbiot_store::Error> for ApiError {
     fn from(e: symbiot_store::Error) -> Self {
         use symbiot_store::Error::*;
         match e {
-            Invalid(_) | BadEvidence { .. } => ApiError(StatusCode::BAD_REQUEST, e.to_string()),
+            Invalid(_) | BadEvidence { .. } | Suggestion(_) => {
+                ApiError(StatusCode::BAD_REQUEST, e.to_string())
+            }
             Files(_) => {
                 tracing::warn!(error = %e, "file store");
                 ApiError(StatusCode::BAD_REQUEST, e.to_string())
@@ -821,7 +927,7 @@ impl From<symbiot_store::Error> for ApiError {
                 tracing::error!(error = %e, "fork in a chain");
                 ApiError(StatusCode::CONFLICT, e.to_string())
             }
-            Sqlite(_) | Encoding(_) => {
+            Sqlite(_) | Encoding(_) | Json(_) => {
                 tracing::error!(error = %e, "store failure");
                 ApiError(StatusCode::INTERNAL_SERVER_ERROR, "interner Fehler".into())
             }

@@ -7,6 +7,7 @@
 
 extern crate alloc;
 
+pub mod action;
 mod bytes;
 mod edge;
 pub mod evidence;
@@ -18,6 +19,7 @@ mod node;
 mod person;
 mod proposal;
 pub mod rule;
+pub mod source;
 
 pub use bytes::{Blob, EdgeId, Hash, NodeId, PubKey, RuleId, Salt, Sig};
 pub use edge::{Edge, EdgeKind};

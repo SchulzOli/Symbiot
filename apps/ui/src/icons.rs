@@ -35,6 +35,11 @@ pub enum Icon {
     Rules,
     Sync,
     Download,
+    Sources,
+    Pause,
+    Play,
+    Filter,
+    Calendar,
 }
 
 impl Icon {
@@ -109,6 +114,17 @@ impl Icon {
             }
             Icon::Download => {
                 r#"<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>"#
+            }
+            Icon::Sources => {
+                r#"<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/>"#
+            }
+            Icon::Pause => {
+                r#"<rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/>"#
+            }
+            Icon::Play => r#"<polygon points="6 3 20 12 6 21 6 3"/>"#,
+            Icon::Filter => r#"<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>"#,
+            Icon::Calendar => {
+                r#"<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>"#
             }
         }
     }

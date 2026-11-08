@@ -75,6 +75,16 @@ export default defineConfig({
       use: { baseURL: "http://127.0.0.1:8113" },
     },
     {
+      name: "assistent",
+      testMatch: "assistent.spec.ts",
+      use: { baseURL: "http://127.0.0.1:8115" },
+    },
+    {
+      name: "quellen",
+      testMatch: "quellen.spec.ts",
+      use: { baseURL: "http://127.0.0.1:8117" },
+    },
+    {
       name: "geraete",
       testMatch: "geraete.spec.ts",
       use: { baseURL: "http://127.0.0.1:8105" },
@@ -95,6 +105,10 @@ export default defineConfig({
     }),
     server(8105),
     server(8113),
+    server(8115, {
+      SYMBIOT_AI_URL: `http://127.0.0.1:${llmPort}/v1`,
+      SYMBIOT_AI_MODEL: "mock",
+    }),
     serverWithImports(8109, [
       ["whatsapp", "whatsapp-wandern.txt", "--chat Wandergruppe --utc-offset 60"],
       ["mbox", "rechnung.mbox"],
@@ -102,6 +116,10 @@ export default defineConfig({
     serverWithImports(8111, [
       ["whatsapp", "whatsapp-wandern.txt", "--chat Wandergruppe --utc-offset 60"],
       ["mbox", "anna.mbox"],
+    ]),
+    serverWithImports(8117, [
+      ["whatsapp", "whatsapp-wandern.txt", "--chat Wandergruppe --utc-offset 60"],
+      ["mbox", "rechnung.mbox"],
     ]),
     server(8107, {
       SYMBIOT_AI_URL: `http://127.0.0.1:${llmPort}/v1`,

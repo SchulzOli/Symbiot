@@ -9,13 +9,18 @@
 
 use std::time::Duration;
 
+mod assist;
+pub use assist::{
+    AssistContext, MAX_ACTIONS, MAX_NODES, assist_context, assist_messages, parse_assist,
+};
+
 use serde::{Deserialize, Serialize};
 use symbiot_core::{Edge, Node, NodeId, NodeKind, Proposal, Rule};
 
 /// At most this many nodes besides the goal go into the context.
 pub const MAX_RELATED: usize = 20;
 /// Node bodies are cut to this many characters in the prompt.
-const MAX_BODY: usize = 400;
+pub(crate) const MAX_BODY: usize = 400;
 const MAX_TITLE: usize = 200;
 const MAX_PROPOSAL_BODY: usize = 2000;
 
@@ -266,14 +271,14 @@ pub fn parse(reply: &str, ctx: &Context, model: &str) -> Result<Proposal, Error>
     })
 }
 
-fn strip_thinking(reply: &str) -> &str {
+pub(crate) fn strip_thinking(reply: &str) -> &str {
     match reply.rfind("</think>") {
         Some(i) => &reply[i + "</think>".len()..],
         None => reply,
     }
 }
 
-fn cut(s: &str, max: usize) -> String {
+pub(crate) fn cut(s: &str, max: usize) -> String {
     match s.char_indices().nth(max) {
         Some((i, _)) => format!("{}…", &s[..i]),
         None => s.to_string(),
@@ -432,6 +437,10 @@ pub trait Advisor: Send + Sync {
     fn propose(&self, ctx: &Context) -> Result<Proposal, Error>;
     /// E4: rules for what is sensitive. Always the local model.
     fn suggest_rules(&self, ctx: &RuleContext) -> Result<Vec<RuleProposal>, Error>;
+    /// E16: the human's request as a suggestion of actions.
+    fn assist(&self, _ctx: &AssistContext) -> Result<symbiot_core::action::Suggestion, Error> {
+        Err(Error::NotConfigured)
+    }
 }
 
 /// An OpenAI-compatible endpoint, normally LiteLLM on the home server.
@@ -478,6 +487,16 @@ impl Advisor for LiteLlm {
         let model = &self.config.local_model;
         let content = self.chat(model, rule_messages(ctx, model))?;
         parse_rules(&content, ctx, model)
+    }
+
+    fn assist(&self, ctx: &AssistContext) -> Result<symbiot_core::action::Suggestion, Error> {
+        let model = if ctx.remote {
+            self.config.remote_model.as_deref().ok_or(Error::NoRemote)?
+        } else {
+            &self.config.local_model
+        };
+        let content = self.chat(model, assist_messages(ctx, model))?;
+        parse_assist(&content, ctx, model)
     }
 }
 
