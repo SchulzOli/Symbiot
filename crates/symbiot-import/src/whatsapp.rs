@@ -9,14 +9,18 @@
 //! `Name: ` are system messages and are left out. Times are local; `utc_offset_min` says
 //! how far ahead of UTC they are. WhatsApp exports have no message ids, so the id is a
 //! fingerprint of time, sender, text and how often that combination came before.
+//!
+//! Exported „with media“, a message names its file (`IMG-….jpg (Datei angehängt)`, on an
+//! iPhone `<Anhang: …jpg>`); the file lies next to the `.txt` in `dir`.
 
 use std::collections::HashMap;
+use std::path::Path;
 
 use symbiot_core::evidence::{Actor, Evidence, role};
 
-use crate::{Error, Result, civil_ms, fingerprint};
+use crate::{Error, Import, Result, civil_ms, file_at, fingerprint};
 
-pub fn parse(text: &str, chat: &str, utc_offset_min: i32) -> Result<Vec<Evidence>> {
+pub fn parse(text: &str, chat: &str, utc_offset_min: i32, dir: Option<&Path>) -> Result<Import> {
     let mut out: Vec<Evidence> = Vec::new();
     let mut in_system = false;
     let mut seen_header = false;
@@ -65,7 +69,39 @@ pub fn parse(text: &str, chat: &str, utc_offset_min: i32) -> Result<Vec<Evidence
         *n += 1;
         e.id = format!("whatsapp:{}/{base}-{n}", chat_key(chat));
     }
-    Ok(out)
+    let mut pending = Vec::new();
+    if let Some(dir) = dir {
+        for e in &mut out {
+            let Some(name) = attachment(&e.text) else {
+                continue;
+            };
+            if let Some((file, p)) = file_at(&dir.join(name), name, None) {
+                e.files.push(file);
+                pending.push(p);
+            }
+        }
+    }
+    Ok(Import {
+        items: out,
+        files: pending,
+    })
+}
+
+/// The file a message names on its first line, in the forms Android and iPhone use.
+fn attachment(text: &str) -> Option<&str> {
+    let line = text.lines().next()?.trim();
+    let name = [" (Datei angehängt)", " (file attached)"]
+        .iter()
+        .find_map(|s| line.strip_suffix(s))
+        .or_else(|| {
+            ["<Anhang: ", "<attached: "]
+                .iter()
+                .find_map(|p| line.strip_prefix(p))
+                .and_then(|r| r.strip_suffix('>'))
+        })?
+        .trim();
+    // Only a plain file name: nothing may point outside the export's folder.
+    (!name.is_empty() && !name.contains(['/', '\\']) && name != "..").then_some(name)
 }
 
 /// Removes the invisible marks iPhones add and turns special spaces into normal ones.
@@ -172,7 +208,7 @@ wie geht's?
 
     #[test]
     fn android_german() {
-        let items = parse(ANDROID, "Anna", 60).unwrap();
+        let items = parse(ANDROID, "Anna", 60, None).unwrap().items;
         assert_eq!(items.len(), 4, "the system line is left out");
         assert_eq!(items[0].text, "Hallo\nwie geht's?");
         assert_eq!(items[0].actors[0].id, "name:Anna");
@@ -185,7 +221,7 @@ wie geht's?
         );
         assert!(items.iter().all(|e| e.check().is_ok()));
         // A second export of the same chat gives the same ids.
-        let again = parse(ANDROID, "Anna", 60).unwrap();
+        let again = parse(ANDROID, "Anna", 60, None).unwrap().items;
         assert_eq!(
             items.iter().map(|e| &e.id).collect::<Vec<_>>(),
             again.iter().map(|e| &e.id).collect::<Vec<_>>()
@@ -195,21 +231,42 @@ wie geht's?
     #[test]
     fn iphone_and_english() {
         let ios = "\u{200e}[12.03.24, 14:05:33] Anna: Hallo\n";
-        let e = &parse(ios, "Anna", 0).unwrap()[0];
+        let e = &parse(ios, "Anna", 0, None).unwrap().items[0];
         assert_eq!(e.at_ms, civil_ms(2024, 3, 12, 14, 5, 33).unwrap());
         assert_eq!(e.text, "Hallo");
 
         let us = "3/12/24, 2:05\u{202f}PM - Anna: Hello\n";
-        let e = &parse(us, "Anna", 0).unwrap()[0];
+        let e = &parse(us, "Anna", 0, None).unwrap().items[0];
         assert_eq!(e.at_ms, civil_ms(2024, 3, 12, 14, 5, 0).unwrap());
+    }
+
+    #[test]
+    fn media_next_to_the_chat() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("IMG-20240312-WA0001.jpg"), b"jpeg").unwrap();
+        std::fs::write(dir.path().join("00000012-PHOTO.jpg"), b"jpeg2").unwrap();
+        let chat = "\
+12.03.24, 14:05 - Anna: IMG-20240312-WA0001.jpg (Datei angehängt)
+Der See!
+12.03.24, 14:06 - Ben: PTT-20240312-WA0002.opus (Datei angehängt)
+[12.03.24, 14:07:00] Anna: <Anhang: 00000012-PHOTO.jpg>
+12.03.24, 14:08 - Anna: ../geheim.txt (Datei angehängt)
+";
+        let got = parse(chat, "Anna", 0, Some(dir.path())).unwrap();
+        assert_eq!(got.items[0].files[0].name, "IMG-20240312-WA0001.jpg");
+        assert_eq!(got.items[0].files[0].mime, "image/jpeg");
+        assert!(got.items[1].files.is_empty(), "voice message not exported");
+        assert_eq!(got.items[2].files[0].name, "00000012-PHOTO.jpg");
+        assert!(got.items[3].files.is_empty(), "never outside the folder");
+        assert_eq!(got.files.len(), 2);
     }
 
     #[test]
     fn not_an_export() {
         assert!(matches!(
-            parse("irgendein Text\n", "x", 0),
+            parse("irgendein Text\n", "x", 0, None),
             Err(Error::Format(_))
         ));
-        assert!(parse("", "x", 0).unwrap().is_empty());
+        assert!(parse("", "x", 0, None).unwrap().items.is_empty());
     }
 }

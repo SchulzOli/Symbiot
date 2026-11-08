@@ -5,7 +5,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use axum::body::Bytes;
+use axum::extract::DefaultBodyLimit;
 use axum::extract::{OriginalUri, Path, Query, State};
+use axum::http::header;
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
@@ -13,8 +15,8 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use symbiot_ai::Advisor;
 use symbiot_core::{
-    Edge, EdgeId, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal, PubKey, Rule,
-    RuleId,
+    Edge, EdgeId, EdgeKind, Hash, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal, PubKey,
+    Rule, RuleId,
 };
 use symbiot_store::{
     ChainHead, DeviceInfo, EvidenceQuery, Origin, Sensitivity as NodeSensitivity, Store,
@@ -71,8 +73,9 @@ pub fn app(store: Store, ui_dir: Option<PathBuf>, ai: Option<Arc<dyn Advisor>>) 
         .route("/person/words", post(new_words))
         .route("/person/certify", post(certify))
         .route("/person/revoke", post(revoke))
+        .route("/files/{hash}", get(get_file))
         .route("/sync/heads", get(sync_heads))
-        .route("/sync/chains/{author}", get(sync_pull).post(sync_push));
+        .merge(sync_routes());
 
     let state = AppState {
         store: Mutex::new(store),
@@ -91,6 +94,18 @@ pub fn app(store: Store, ui_dir: Option<PathBuf>, ai: Option<Arc<dyn Advisor>>) 
         None => router,
     };
     router.layer(TraceLayer::new_for_http())
+}
+
+/// Routes that carry chains and files. Only they may send large bodies: chains arrive in
+/// pieces of `PUSH_CHUNK` entries, files up to `MAX_FILE_BYTES` (#28).
+fn sync_routes() -> Router<Shared> {
+    Router::new()
+        .route("/sync/chains/{author}", get(sync_pull).post(sync_push))
+        .route("/sync/files/missing", get(sync_files_missing))
+        .route("/sync/files/{hash}", get(sync_file_get).post(sync_file_put))
+        .layer(DefaultBodyLimit::max(
+            symbiot_store::MAX_FILE_BYTES as usize + 1024 * 1024,
+        ))
 }
 
 async fn health() -> Json<Health> {
@@ -592,6 +607,114 @@ async fn sync_push(
     Ok(Json(symbiot_sync::Pushed { received }))
 }
 
+fn parse_hash(hash: &str) -> Result<Hash, ApiError> {
+    Hash::from_hex(hash).ok_or(ApiError::bad("ungültiger Hash"))
+}
+
+/// #28: what the home server's raw data references but it does not have yet.
+async fn sync_files_missing(
+    State(s): State<Shared>,
+    method: Method,
+    uri: OriginalUri,
+    headers: HeaderMap,
+) -> Result<Json<Vec<Hash>>, ApiError> {
+    let device = device_of(&headers, &method, &uri, b"")?;
+    require_trusted(&s, &device)?;
+    Ok(Json(lock(&s).missing_files()?))
+}
+
+async fn sync_file_get(
+    State(s): State<Shared>,
+    method: Method,
+    uri: OriginalUri,
+    headers: HeaderMap,
+    Path(hash): Path<String>,
+) -> Result<Vec<u8>, ApiError> {
+    let device = device_of(&headers, &method, &uri, b"")?;
+    require_trusted(&s, &device)?;
+    let hash = parse_hash(&hash)?;
+    lock(&s)
+        .file(&hash)?
+        .ok_or(ApiError(StatusCode::NOT_FOUND, "Datei nicht hier".into()))
+}
+
+/// A device sends a file. Only files that raw data here references, checked against the hash.
+async fn sync_file_put(
+    State(s): State<Shared>,
+    method: Method,
+    uri: OriginalUri,
+    headers: HeaderMap,
+    Path(hash): Path<String>,
+    body: Bytes,
+) -> Result<StatusCode, ApiError> {
+    let device = device_of(&headers, &method, &uri, &body)?;
+    require_trusted(&s, &device)?;
+    let hash = parse_hash(&hash)?;
+    let store = lock(&s);
+    if store.file_info(&hash)?.is_none() {
+        return Err(ApiError::bad("Keine Rohdaten verweisen auf diese Datei"));
+    }
+    store.put_file_checked(&hash, &body)?;
+    tracing::info!(%device, %hash, len = body.len(), "file received");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Types the browser may show inline. Everything else is offered as a download, so a file
+/// from outside (a mail attachment) can never run as a page of this origin.
+const INLINE: &[&str] = &[
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "video/mp4",
+    "audio/mpeg",
+    "audio/ogg",
+    "audio/mp4",
+];
+
+/// For the web UI: a file of the raw data, e.g. a photo in the timeline.
+async fn get_file(State(s): State<Shared>, Path(hash): Path<String>) -> Result<Response, ApiError> {
+    let hash = parse_hash(&hash)?;
+    let store = lock(&s);
+    let info = store
+        .file_info(&hash)?
+        .ok_or(ApiError(StatusCode::NOT_FOUND, "Datei unbekannt".into()))?;
+    let bytes = store.file(&hash)?.ok_or(ApiError(
+        StatusCode::NOT_FOUND,
+        "Datei noch nicht hier".into(),
+    ))?;
+    let inline = INLINE.contains(&info.mime.as_str());
+    let mime = if inline {
+        info.mime.clone()
+    } else {
+        "application/octet-stream".into()
+    };
+    let name: String = info
+        .name
+        .chars()
+        .filter(|c| c.is_ascii_graphic() && !matches!(c, '"' | '\\' | ';'))
+        .collect();
+    let disposition = format!(
+        "{}; filename=\"{}\"",
+        if inline { "inline" } else { "attachment" },
+        if name.is_empty() { "datei" } else { &name }
+    );
+    Ok((
+        [
+            (header::CONTENT_TYPE, mime),
+            (header::CONTENT_DISPOSITION, disposition),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".into()),
+            (header::CONTENT_SECURITY_POLICY, "sandbox".into()),
+            (
+                header::CACHE_CONTROL,
+                "private, max-age=31536000, immutable".into(),
+            ),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+
 fn lock(s: &Shared) -> MutexGuard<'_, Store> {
     // Writes are transactions, so a panic while holding the lock leaves SQLite consistent.
     s.store.lock().unwrap_or_else(|p| p.into_inner())
@@ -614,6 +737,10 @@ impl From<symbiot_store::Error> for ApiError {
         use symbiot_store::Error::*;
         match e {
             Invalid(_) | BadEvidence { .. } => ApiError(StatusCode::BAD_REQUEST, e.to_string()),
+            Files(_) => {
+                tracing::warn!(error = %e, "file store");
+                ApiError(StatusCode::BAD_REQUEST, e.to_string())
+            }
             UnknownNode(_) | UnknownEdge(_) => ApiError(StatusCode::NOT_FOUND, e.to_string()),
             BadChain(_) => ApiError(StatusCode::BAD_REQUEST, e.to_string()),
             Untrusted => ApiError(StatusCode::FORBIDDEN, e.to_string()),

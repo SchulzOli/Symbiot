@@ -8,12 +8,12 @@ use std::process::Command;
 
 use symbiot_core::evidence::{Actor, Evidence, role};
 
-use crate::{Error, Result};
+use crate::{Error, Import, Result};
 
 const FIELD: char = '\u{1f}';
 const RECORD: char = '\u{1e}';
 
-pub fn read(repo: &Path) -> Result<Vec<Evidence>> {
+pub fn read(repo: &Path) -> Result<Import> {
     let format = ["%H", "%at", "%an", "%ae", "%cn", "%ce", "%s", "%b"].join("%x1f") + "%x1e";
     let log = git(
         repo,
@@ -54,7 +54,10 @@ pub fn read(repo: &Path) -> Result<Vec<Evidence>> {
             files: vec![],
         });
     }
-    Ok(out)
+    Ok(Import {
+        items: out,
+        files: vec![],
+    })
 }
 
 fn person(email: &str, name: &str, role: &str) -> Actor {
@@ -152,7 +155,7 @@ mod tests {
             ],
         );
 
-        let items = read(d).unwrap();
+        let items = read(d).unwrap().items;
         assert_eq!(items.len(), 2);
         let newest = &items[0];
         assert!(newest.id.starts_with("git:github.com/beispiel/projekt@"));

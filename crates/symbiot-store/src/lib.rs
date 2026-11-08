@@ -20,12 +20,15 @@ use symbiot_core::{
 /// 4: rules for what is sensitive and marks by hand (E4); `sensitive` holds the result.
 /// 5: raw data (E14) in `evidence`.
 /// 6: `evidence` knows its origin, `evidence_fts` indexes the words (#30); rebuilt from the ledger.
-const SCHEMA_VERSION: i64 = 6;
+/// 7: `evidence_file` lists the files raw data references (#28); rebuilt from the ledger.
+const SCHEMA_VERSION: i64 = 7;
 
 mod evidence;
+mod files;
 mod sync;
 
 pub use evidence::{EvidenceQuery, Origin, Recorded, StoredEvidence};
+pub use files::{FileInfo, MAX_FILE_BYTES};
 
 pub use symbiot_core::VerifyReport;
 pub use sync::{ChainHead, DeviceInfo, new_words};
@@ -64,6 +67,9 @@ pub enum Error {
     /// Raw data that breaks the contract (E14). Nothing of the import was written.
     #[error("Beleg {id}: {reason}")]
     BadEvidence { id: String, reason: String },
+    /// The file store (#28): a file could not be read or written, or does not match its hash.
+    #[error("Dateien: {0}")]
+    Files(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -72,6 +78,8 @@ pub struct Store {
     conn: Connection,
     signer: Signer,
     set_aside: Option<PathBuf>,
+    /// Folder of the file store (#28); `None` for a store in memory.
+    files: Option<PathBuf>,
 }
 
 /// Reads the device's signing seed, creating it on first start. Back this file up: it is the device identity.
@@ -108,7 +116,9 @@ impl Store {
         std::fs::create_dir_all(dir).map_err(|_| Error::Invalid("Datenordner nicht anlegbar"))?;
         let seed = load_or_create_seed(&dir.join("device.key"))
             .map_err(|_| Error::Invalid("Geräteschlüssel nicht lesbar"))?;
-        Self::open(&dir.join("symbiot.db"), Signer::from_seed(seed))
+        let mut store = Self::open(&dir.join("symbiot.db"), Signer::from_seed(seed))?;
+        store.files = Some(dir.join("files"));
+        Ok(store)
     }
 
     /// Opens `db`. A database in the old v1 format holds only test data (no migration, decided
@@ -201,7 +211,7 @@ impl Store {
                  PRIMARY KEY (author, seq, hash)
              );",
         )?;
-        if version > 0 && version < 6 {
+        if version > 0 && version < 7 {
             conn.execute_batch(evidence::DROP)?;
         }
         conn.execute_batch(evidence::SCHEMA)?;
@@ -217,6 +227,7 @@ impl Store {
             conn,
             signer,
             set_aside: None,
+            files: None,
         })
     }
 

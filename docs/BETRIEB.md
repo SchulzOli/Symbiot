@@ -19,7 +19,7 @@ Tag vX.Y.Z ─► Release: Installer für Windows, Linux, macOS als GitHub Relea
 | Was | Wo |
 |---|---|
 | Compose | `/opt/stacks/symbiot/compose.yaml` (Vorlage: [deploy/compose.yaml](../deploy/compose.yaml)) |
-| Daten | `/opt/stacks/symbiot/data`: `symbiot.db` + `device.key`. Gehört uid 65532. **Gehört ins Backup**, denn `device.key` ist die Identität des Servers. |
+| Daten | `/opt/stacks/symbiot/data`: `symbiot.db`, `device.key` und `files/` (Fotos und Anhänge der Rohdaten). Gehört uid 65532. **Gehört ins Backup**, denn `device.key` ist die Identität des Servers. |
 | Lokal | `http://127.0.0.1:8100` (`/health`, `/api/…`, UI) |
 | Tailnet | `https://heimserver.example.ts.net:8449`, Eintrag in `/opt/stacks/tailscale/config/serve.json` |
 | Gesundheit | Docker-HEALTHCHECK `symbiot-server --health` → Komodo und Beszel sehen `healthy`/`unhealthy` |

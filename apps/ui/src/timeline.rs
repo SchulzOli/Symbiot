@@ -5,8 +5,8 @@
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use symbiot_core::Evidence;
 use symbiot_core::evidence::role;
+use symbiot_core::{Evidence, FileRef};
 use wasm_bindgen::JsValue;
 
 use crate::api::{self, EvidenceFilter, StoredEvidence};
@@ -168,7 +168,49 @@ fn EvidenceRow(item: Evidence) -> impl IntoView {
                     {move || if expanded.get() { "weniger" } else { "ganz lesen" }}
                 </button>
             })}
+            {(!item.files.is_empty()).then(|| view! {
+                <div class="files">
+                    {item.files.iter().cloned().map(|f| view! { <FileView file=f /> }).collect_view()}
+                </div>
+            })}
         </article>
+    }
+}
+
+/// #28: a picture inline, any other file as a link (browser) or its name (app).
+#[component]
+fn FileView(file: FileRef) -> impl IntoView {
+    let label = format!("{} ({})", file.name, size(file.len));
+    let url = api::file_url(&file.hash);
+    if api::is_picture(&file.mime) {
+        let src = match url {
+            Some(u) => Signal::derive(move || Some(u.clone())),
+            None => {
+                let hash = file.hash;
+                let data = LocalResource::new(move || api::file_data_url(hash));
+                Signal::derive(move || data.get().and_then(|r| r.ok()).flatten())
+            }
+        };
+        let alt = file.name.clone();
+        return view! {
+            {move || match src.get() {
+                Some(s) => view! { <img class="thumb" src=s alt=alt.clone() loading="lazy" /> }.into_any(),
+                None => view! { <span class="muted file">{format!("🖼 {label}")}</span> }.into_any(),
+            }}
+        }
+        .into_any();
+    }
+    match url {
+        Some(u) => view! { <a class="file" href=u>{format!("📎 {label}")}</a> }.into_any(),
+        None => view! { <span class="muted file">{format!("📎 {label}")}</span> }.into_any(),
+    }
+}
+
+fn size(len: u64) -> String {
+    match len {
+        n if n >= 1024 * 1024 => format!("{:.1} MB", n as f64 / (1024.0 * 1024.0)),
+        n if n >= 1024 => format!("{} KB", n / 1024),
+        n => format!("{n} B"),
     }
 }
 

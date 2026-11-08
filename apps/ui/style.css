@@ -271,3 +271,9 @@ button.link {
   background: none; border: none; padding: 0; color: var(--accent);
   cursor: pointer; font: inherit; font-size: 0.9rem;
 }
+.evidence .files { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: flex-start; }
+.evidence .thumb {
+  max-width: min(100%, 320px); max-height: 240px; border-radius: 8px;
+  border: 1px solid var(--border); object-fit: cover;
+}
+.evidence .file { font-size: 0.9rem; overflow-wrap: anywhere; }

@@ -76,6 +76,14 @@ pub(crate) const SCHEMA: &str = "
     CREATE INDEX IF NOT EXISTS evidence_time ON evidence (at_ms);
     CREATE INDEX IF NOT EXISTS evidence_kind ON evidence (kind, at_ms);
     CREATE INDEX IF NOT EXISTS evidence_origin ON evidence (origin, at_ms);
+    CREATE TABLE IF NOT EXISTS evidence_file (
+        hash BLOB NOT NULL,
+        key  BLOB NOT NULL,
+        name TEXT NOT NULL,
+        mime TEXT NOT NULL,
+        len  INTEGER NOT NULL,
+        PRIMARY KEY (hash, key)
+    );
     CREATE VIRTUAL TABLE IF NOT EXISTS evidence_fts USING fts5 (
         text, meta,
         content = '', contentless_delete = 1,
@@ -83,7 +91,7 @@ pub(crate) const SCHEMA: &str = "
     );";
 
 /// Drops the raw-data tables of an older schema; they are rebuilt from the ledger.
-pub(crate) const DROP: &str = "DROP TABLE IF EXISTS evidence; DROP TABLE IF EXISTS evidence_fts;";
+pub(crate) const DROP: &str = "DROP TABLE IF EXISTS evidence; DROP TABLE IF EXISTS evidence_fts; DROP TABLE IF EXISTS evidence_file;";
 
 impl Store {
     /// Loads raw data into this device's chain, in batches (E13). Items whose key is already
@@ -262,6 +270,19 @@ pub(crate) fn project_evidence(tx: &Connection, change: &Change) -> Result<()> {
                 "INSERT INTO evidence_fts (rowid, text, meta) VALUES (?1, ?2, ?3)",
                 params![tx.last_insert_rowid(), item.text, meta_of(item)],
             )?;
+            for f in &item.files {
+                tx.execute(
+                    "INSERT OR IGNORE INTO evidence_file (hash, key, name, mime, len)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        f.hash.0.as_slice(),
+                        key.0.as_slice(),
+                        f.name,
+                        f.mime,
+                        f.len as i64
+                    ],
+                )?;
+            }
         }
     }
     Ok(())
@@ -281,7 +302,7 @@ pub(crate) fn receive_evidence(tx: &Connection, e: &LedgerEntry) -> Result<()> {
 
 /// Fills the evidence table from the ledger, e.g. after an upgrade.
 pub(crate) fn rebuild_evidence(tx: &Connection) -> Result<()> {
-    tx.execute_batch("DELETE FROM evidence; DELETE FROM evidence_fts;")?;
+    tx.execute_batch("DELETE FROM evidence; DELETE FROM evidence_fts; DELETE FROM evidence_file;")?;
     for chain in all_chains(tx)? {
         for e in &chain {
             receive_evidence(tx, e)?;

@@ -263,10 +263,18 @@ fn SyncState(on_saved: impl Fn() + Copy + Send + Sync + 'static) -> impl IntoVie
     let describe = |s: &api::SyncStatus| -> String {
         match (s.last_ok_ms, s.last) {
             (Some(ms), Some(r)) => format!(
-                "Zuletzt abgeglichen {} · {} gesendet, {} empfangen",
+                "Zuletzt abgeglichen {} · {} gesendet, {} empfangen{}",
                 format_ms(ms),
                 r.sent,
-                r.received
+                r.received,
+                if r.files_sent + r.files_received > 0 {
+                    format!(
+                        " · Dateien: {} gesendet, {} empfangen",
+                        r.files_sent, r.files_received
+                    )
+                } else {
+                    String::new()
+                }
             ),
             _ => "Noch nicht abgeglichen".into(),
         }

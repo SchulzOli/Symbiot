@@ -4440,6 +4440,7 @@ dependencies = [
 name = "symbiot-desktop"
 version = "0.3.0"
 dependencies = [
+ "base64 0.22.1",
  "serde",
  "symbiot-ai",
  "symbiot-core",
@@ -4479,6 +4480,7 @@ dependencies = [
  "symbiot-core",
  "symbiot-store",
  "symbiot-sync",
+ "tempfile",
  "tokio",
  "tower",
  "tower-http 0.7.1",
@@ -4496,6 +4498,7 @@ dependencies = [
  "postcard",
  "rusqlite",
  "serde",
+ "sha2 0.11.1",
  "symbiot-core",
  "tempfile",
  "thiserror 2.0.21",

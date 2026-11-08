@@ -4,12 +4,16 @@
 //! (`{"chats": {"list": [chat, ...]}}`). Only messages; service entries (joined, pinned, …)
 //! are left out.
 
+use std::path::Path;
+
 use serde_json::Value;
 use symbiot_core::evidence::{Actor, Evidence, role};
 
-use crate::{Error, Result};
+use crate::{Error, Import, Result, file_at};
 
-pub fn parse(json: &str) -> Result<Vec<Evidence>> {
+/// `dir` is the export's folder: photos and files are found relative to it. Telegram writes
+/// „(File not included …)“ for media it did not export; those stay a name only.
+pub fn parse(json: &str, dir: Option<&Path>) -> Result<Import> {
     let v: Value = serde_json::from_str(json)?;
     let chats: Vec<&Value> = if let Some(list) = v.pointer("/chats/list").and_then(Value::as_array)
     {
@@ -22,6 +26,7 @@ pub fn parse(json: &str) -> Result<Vec<Evidence>> {
         ));
     };
     let mut out = Vec::new();
+    let mut pending = Vec::new();
     for chat in chats {
         let chat_id = id_text(&chat["id"]).unwrap_or_else(|| "unbekannt".into());
         let chat_name = chat["name"].as_str().unwrap_or("");
@@ -56,9 +61,27 @@ pub fn parse(json: &str) -> Result<Vec<Evidence>> {
             if let Some(reply) = id_text(&m["reply_to_message_id"]) {
                 fields.push(("reply_to".into(), format!("telegram:{chat_id}/{reply}")));
             }
+            let mut files = Vec::new();
             for key in ["photo", "file"] {
-                if let Some(path) = m[key].as_str() {
-                    fields.push(("attachment".into(), path.into()));
+                let Some(rel) = m[key].as_str() else {
+                    continue;
+                };
+                fields.push(("attachment".into(), rel.into()));
+                if rel.starts_with('(') {
+                    continue;
+                }
+                let Some(dir) = dir else {
+                    continue;
+                };
+                let name = m["file_name"]
+                    .as_str()
+                    .filter(|_| key == "file")
+                    .or_else(|| Path::new(rel).file_name().and_then(|n| n.to_str()))
+                    .unwrap_or(rel);
+                let mime = m["mime_type"].as_str().filter(|_| key == "file");
+                if let Some((file, p)) = file_at(&dir.join(rel), name, mime) {
+                    files.push(file);
+                    pending.push(p);
                 }
             }
             if let Some(edited) = m["edited_unixtime"].as_str() {
@@ -71,11 +94,14 @@ pub fn parse(json: &str) -> Result<Vec<Evidence>> {
                 actors,
                 text: text_of(&m["text"]),
                 fields,
-                files: vec![],
+                files,
             });
         }
     }
-    Ok(out)
+    Ok(Import {
+        items: out,
+        files: pending,
+    })
 }
 
 /// Ids are numbers in some exports and strings in others.
@@ -121,7 +147,7 @@ mod tests {
 
     #[test]
     fn one_chat() {
-        let items = parse(CHAT).unwrap();
+        let items = parse(CHAT, None).unwrap().items;
         assert_eq!(items.len(), 2, "service entries are left out");
         let a = &items[0];
         assert_eq!(a.id, "telegram:4242/2");
@@ -145,12 +171,34 @@ mod tests {
     #[test]
     fn whole_account() {
         let account = format!(r#"{{"chats": {{"list": [{CHAT}, {CHAT}]}}}}"#);
-        assert_eq!(parse(&account).unwrap().len(), 4);
+        assert_eq!(parse(&account, None).unwrap().items.len(), 4);
     }
 
     #[test]
     fn not_an_export() {
-        assert!(matches!(parse(r#"{"foo": 1}"#), Err(Error::Format(_))));
-        assert!(matches!(parse("nein"), Err(Error::Json(_))));
+        assert!(matches!(
+            parse(r#"{"foo": 1}"#, None),
+            Err(Error::Format(_))
+        ));
+        assert!(matches!(parse("nein", None), Err(Error::Json(_))));
+    }
+
+    #[test]
+    fn photos_next_to_the_export() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("photos")).unwrap();
+        std::fs::write(dir.path().join("photos/photo_1.jpg"), b"jpeg").unwrap();
+        let chat = CHAT.replace(
+            r#""photo": "photos/photo_1.jpg""#,
+            r#""photo": "photos/photo_1.jpg", "file": "(File not included. Change data exporting settings to download.)""#,
+        );
+        let got = parse(&chat, Some(dir.path())).unwrap();
+        let photo = &got.items[1].files;
+        assert_eq!(photo.len(), 1, "the missing file stays a name only");
+        assert_eq!(photo[0].name, "photo_1.jpg");
+        assert_eq!(photo[0].mime, "image/jpeg");
+        assert_eq!(photo[0].len, 4);
+        assert_eq!(got.files.len(), 1);
+        assert_eq!(got.files[0].hash, photo[0].hash);
     }
 }

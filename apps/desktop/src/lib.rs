@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 
 use symbiot_ai::{Advisor, Info};
 use symbiot_core::{
-    Edge, EdgeId, EdgeKind, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal, PubKey, Rule,
-    RuleId, VerifyReport,
+    Edge, EdgeId, EdgeKind, Hash, LedgerEntry, Node, NodeId, NodeKind, Policy, Proposal, PubKey,
+    Rule, RuleId, VerifyReport,
 };
 use symbiot_store::{DeviceInfo, EvidenceQuery, Origin, Sensitivity, Store, StoredEvidence};
 use tauri::{Manager, State};
@@ -205,6 +205,32 @@ fn list_evidence(
         offset: filter.offset,
     };
     store.with(|s| s.evidence(&q))
+}
+
+/// Pictures up to this size are shown in the app (#28); larger ones only by name.
+const MAX_PICTURE_BYTES: u64 = 8 * 1024 * 1024;
+
+/// #28: a picture of the raw data as `data:` URL. `None` if it is no picture, not here (yet)
+/// or too large.
+#[tauri::command]
+fn file_data_url(store: State<AppStore>, hash: Hash) -> Result<Option<String>, String> {
+    use base64::Engine as _;
+    store.with(|s| {
+        let Some(info) = s.file_info(&hash)? else {
+            return Ok(None);
+        };
+        let picture = matches!(
+            info.mime.as_str(),
+            "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+        );
+        if !picture || info.len > MAX_PICTURE_BYTES {
+            return Ok(None);
+        }
+        Ok(s.file(&hash)?.map(|bytes| {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+            format!("data:{};base64,{b64}", info.mime)
+        }))
+    })
 }
 
 #[tauri::command]
@@ -491,7 +517,8 @@ pub fn run() {
             remove_rule,
             suggest_rules,
             list_evidence,
-            evidence_origins
+            evidence_origins,
+            file_data_url
         ])
         .run(tauri::generate_context!())
         .expect("error while running Symbiot");

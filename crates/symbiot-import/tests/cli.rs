@@ -44,7 +44,7 @@ fn import_twice_adds_nothing_the_second_time() {
     let args = ["whatsapp", &chat, "--daten", data, "--utc-offset", "60"];
 
     let first = stdout(&import(&args, None));
-    assert!(first.contains("3 Belege gelesen"), "{first}");
+    assert!(first.contains("3 Belege und 0 Dateien gelesen"), "{first}");
     assert!(
         first.contains("neu: 3, schon bekannt: 0, Bündel: 1"),
         "{first}"
@@ -98,17 +98,29 @@ fn bad_input_and_usage() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn adapter_chain_reaches_the_home_server() {
+async fn adapter_chain_and_files_reach_the_home_server() {
     let words = symbiot_store::new_words().unwrap();
+    let server_files = tempfile::tempdir().unwrap();
     let mut home = Store::open_in_memory(Signer::from_seed([50; 32])).unwrap();
+    home.set_files_dir(server_files.path().to_path_buf());
     home.certify_self(&words, "Heimserver").unwrap();
     let app = symbiot_server::app(home, None, None);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
+    // A chat exported with media: the photo lies next to the text.
     let dir = tempfile::tempdir().unwrap();
-    let chat = write_chat(dir.path());
+    let chat = dir.path().join("WhatsApp-Chat mit Anna.txt");
+    let with_photo =
+        format!("{CHAT}12.03.24, 14:08 - Anna: IMG-20240312-WA0001.jpg (Datei angehängt)\n");
+    std::fs::write(&chat, with_photo).unwrap();
+    std::fs::write(
+        dir.path().join("IMG-20240312-WA0001.jpg"),
+        b"ein Foto vom See",
+    )
+    .unwrap();
+    let chat = chat.to_string_lossy().into_owned();
     let data = dir.path().join("adapter");
     let (w, u, c, d) = (words.clone(), url.clone(), chat.clone(), data.clone());
     let out = tokio::task::spawn_blocking(move || {
@@ -128,14 +140,16 @@ async fn adapter_chain_reaches_the_home_server() {
     .unwrap();
     let text = stdout(&out);
     assert!(text.contains("bestätigt"), "{text}");
-    assert!(text.contains("gesendet: 2 Einträge"), "{text}");
+    assert!(text.contains("4 Belege und 1 Dateien gelesen"), "{text}");
+    assert!(text.contains("gesendet: 2 Einträge, 1 Dateien"), "{text}");
 
     // A device of the same person sees the adapter's chain on the home server.
     let adapter = Store::open_dir(&data).unwrap().device();
+    let (w, u) = (words.clone(), url.clone());
     let heads = tokio::task::spawn_blocking(move || {
         let mut me = Store::open_in_memory(Signer::from_seed([60; 32])).unwrap();
-        me.certify_self(&words, "PC").unwrap();
-        Remote::new(&url).heads(&Mutex::new(me)).unwrap()
+        me.certify_self(&w, "PC").unwrap();
+        Remote::new(&u).heads(&Mutex::new(me)).unwrap()
     })
     .await
     .unwrap();
@@ -144,4 +158,27 @@ async fn adapter_chain_reaches_the_home_server() {
         .find(|h| h.author == adapter)
         .expect("adapter chain");
     assert_eq!(head.seq, 1, "certificate and one batch");
+
+    // #28: a PC of the same person syncs and gets the photo, checked against its hash.
+    let pc_dir = tempfile::tempdir().unwrap();
+    let p = pc_dir.path().to_path_buf();
+    let (report, photo) = tokio::task::spawn_blocking(move || {
+        let mut pc = Store::open_dir(&p).unwrap();
+        pc.certify_self(&words, "PC").unwrap();
+        let pc = Mutex::new(pc);
+        let report = symbiot_sync::sync(&pc, &Remote::new(&url)).unwrap();
+        let pc = pc.into_inner().unwrap();
+        let item = pc
+            .evidence(&EvidenceQuery::default())
+            .unwrap()
+            .into_iter()
+            .find(|e| !e.evidence.files.is_empty())
+            .expect("message with photo");
+        let hash = item.evidence.files[0].hash;
+        (report, pc.file(&hash).unwrap())
+    })
+    .await
+    .unwrap();
+    assert_eq!(report.files_received, 1);
+    assert_eq!(photo.as_deref(), Some(&b"ein Foto vom See"[..]));
 }
