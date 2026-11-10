@@ -3,14 +3,14 @@
 ## Weg eines Commits
 
 ```
-Commit auf main ─► GitHub Actions: CI (fmt · clippy · test · no_std · WASM · Desktop)
+Commit auf main ─► GitHub Actions: CI (fmt · clippy · test · no_std · WASM · Desktop · E2E · Android)
                 └► Image: ghcr.io/schulzoli/symbiot-server:{main, sha-…}
                           │
                 Komodo auf dem Heimserver („Poll for Updates“ + „Auto Update“) zieht :main nachts, startet neu
                           │
                 https://heimserver.example.ts.net:8449  (nur Tailnet)
 
-Tag vX.Y.Z ─► Release: Installer für Windows, Linux, macOS als GitHub Release
+Tag vX.Y.Z ─► Release: Installer für Windows, Linux, macOS und das Android-APK als GitHub Release
             └► Image zusätzlich als :X.Y.Z
 ```
 
@@ -24,6 +24,12 @@ Tag vX.Y.Z ─► Release: Installer für Windows, Linux, macOS als GitHub Relea
 | Tailnet | `https://heimserver.example.ts.net:8449`, Eintrag in `/opt/stacks/tailscale/config/serve.json` |
 | Gesundheit | Docker-HEALTHCHECK `symbiot-server --health` → Komodo und Beszel sehen `healthy`/`unhealthy` |
 | Logs | JSON nach stdout → Dozzle. Level `ERROR` bei Speicherfehlern und **gebrochener Kette** |
+
+**Backup zurückspielen (2026-11-10, PLAN H5):** Nur gefahrlos, wenn der Heimserver seit dem Backup nichts selbst
+geschrieben hat (keine Bedienung über die Web-Oberfläche, kein Import dort). Sonst kennen die Geräte schon spätere
+Einträge seiner Kette, und was er danach schreibt, passt nicht mehr dazu: Die Geräte lehnen seine Kette dann
+dauerhaft ab. Einen Weg zurück gibt es in der App noch nicht. Daten und Dateien liegen bis H5 unverschlüsselt im
+Datenordner.
 
 ## KI (M3)
 
@@ -79,8 +85,8 @@ Geräteschlüssel schreibt zwei Geschichten) wird mit Level `ERROR` geloggt.
    Danach *Poll for Updates* und *Auto Update* einschalten.
 2. **GHCR:** Ist das Paket `symbiot-server` privat, unter *GitHub → Packages → symbiot-server → Package settings* auf **Public** stellen.
    Alternative: in Komodo eine Registry-Anmeldung für ghcr.io hinterlegen.
-3. **Dozzle-Alarm:** Container `symbiot`, Bedingung Level `error` → Alarm-Raum in Matrix.
-4. **Beszel-Alarm:** Container `symbiot` *unhealthy/stopped* → Alarm-Raum in Matrix.
+3. **Dozzle-Alarm** (noch offen, PLAN H7): Container `symbiot`, Bedingung Level `error` → Alarm-Raum in Matrix.
+4. **Beszel-Alarm** (noch offen, PLAN H7): Container `symbiot` *unhealthy/stopped* → Alarm-Raum in Matrix.
 5. **Android-Signaturschlüssel:** Einmal erzeugen und gut sichern (Passwort-Manager). Mit einem neuen Schlüssel
    kann ein installiertes APK nicht mehr aktualisiert werden, nur neu installiert (Daten weg).
    ```bash
