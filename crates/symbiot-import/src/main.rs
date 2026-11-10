@@ -79,7 +79,10 @@ fn run(a: Args) -> Result<(), String> {
         a.path.display()
     );
 
-    let mut store = Store::open_dir(&a.data).map_err(|e| e.to_string())?;
+    // E6: with SYMBIOT_DB_KEY the adapter's own store is encrypted (needs the feature
+    // `encryption`); without it the raw data lies in the clear in the adapter's folder.
+    let key = symbiot_store::StoreKey::from_env().map_err(|e| e.to_string())?;
+    let mut store = Store::open_dir_with(&a.data, key.as_ref()).map_err(|e| e.to_string())?;
     if store.person().map_err(|e| e.to_string())?.is_none() {
         match std::env::var("SYMBIOT_WORDS") {
             Ok(words) => {

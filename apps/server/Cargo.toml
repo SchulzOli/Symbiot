@@ -21,6 +21,11 @@ tower-http = { version = "0.7.1", features = ["fs", "trace"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["json", "env-filter"] }
 
+# E6: SQLCipher for the store. Building it compiles OpenSSL from source (perl, make). The home
+# server runs on Linux; a development machine with Windows builds without it and needs neither.
+[target.'cfg(not(windows))'.dependencies]
+symbiot-store = { version = "0.3.0", path = "../../crates/symbiot-store", features = ["encryption"] }
+
 [dev-dependencies]
 symbiot-words = { version = "0.3.0", path = "../../crates/symbiot-words" }
 tempfile = "3.27.0"

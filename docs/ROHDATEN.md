@@ -161,5 +161,6 @@ Entscheidungen vorschlagen (E16), ausgeführt werden sie erst nach Bestätigung.
 - Live-Adapter (M9).
 - Der Import aus der App lädt in die Kette des Geräts, an dem man sitzt, nicht in eine eigene Adapter-Kette wie
   `symbiot-import` (Abweichung von E7 und E13, PLAN H6).
-- Dateien sind wie die Datenbank noch unverschlüsselt (E6, #22).
+- Auf dem Heimserver sind Datenbank und Dateien mit `SYMBIOT_DB_KEY` verschlüsselt (H5a). In den Apps und im
+  Ordner eines Adapters ohne Schlüssel liegen sie noch im Klartext (E6, #22).
 - Jedes Gerät lädt beim Abgleich alle fehlenden Dateien. Eine Auswahl (z. B. Fotos nur auf dem Heimserver) fehlt.

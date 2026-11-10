@@ -10,7 +10,26 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 use symbiot_core::Hash;
 
-use crate::{Error, Result, Store};
+use crate::{Error, Result, Store, crypt};
+
+/// Hashes and counts what is read through it.
+struct Counted<R> {
+    inner: R,
+    hasher: Sha256,
+    len: u64,
+}
+
+impl<R: Read> Read for Counted<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.len > MAX_FILE_BYTES {
+            return Err(io::Error::other("zu groß"));
+        }
+        let n = self.inner.read(buf)?;
+        self.hasher.update(&buf[..n]);
+        self.len += n as u64;
+        Ok(n)
+    }
+}
 
 /// Most a single file may have; larger ones are left out of an import (and the sync).
 pub const MAX_FILE_BYTES: u64 = 512 * 1024 * 1024;
@@ -65,28 +84,32 @@ impl Store {
         let dir = self.files_dir()?;
         fs::create_dir_all(dir).map_err(io_err)?;
         let tmp = dir.join(format!(".import-{}", std::process::id()));
-        let mut src = fs::File::open(path).map_err(io_err)?;
+        let mut src = Counted {
+            inner: fs::File::open(path).map_err(io_err)?,
+            hasher: Sha256::new(),
+            len: 0,
+        };
         let mut out = fs::File::create(&tmp).map_err(io_err)?;
-        let mut hasher = Sha256::new();
-        let mut buf = vec![0u8; 64 * 1024];
-        let mut len = 0u64;
-        loop {
-            let n = src.read(&mut buf).map_err(io_err)?;
-            if n == 0 {
-                break;
-            }
-            len += n as u64;
-            if len > MAX_FILE_BYTES {
-                let _ = fs::remove_file(&tmp);
-                return Err(Error::Files(format!("{} ist zu groß", path.display())));
-            }
-            hasher.update(&buf[..n]);
-            out.write_all(&buf[..n]).map_err(io_err)?;
+        let written = self.copy_in(&mut src, &mut out);
+        if src.len > MAX_FILE_BYTES {
+            let _ = fs::remove_file(&tmp);
+            return Err(Error::Files(format!("{} ist zu groß", path.display())));
         }
-        out.sync_all().map_err(io_err)?;
-        let hash = Hash(hasher.finalize().into());
+        written.and_then(|()| out.sync_all()).map_err(|e| {
+            let _ = fs::remove_file(&tmp);
+            io_err(e)
+        })?;
+        let hash = Hash(src.hasher.finalize().into());
         self.place(&tmp, &hash)?;
-        Ok((hash, len))
+        Ok((hash, src.len))
+    }
+
+    /// Writes `src` as it is stored: sealed if this store has a key (E6), plain otherwise.
+    fn copy_in(&self, src: &mut impl Read, out: &mut impl Write) -> io::Result<()> {
+        match &self.file_key {
+            Some(key) => key.seal(src, out),
+            None => io::copy(src, out).map(|_| ()),
+        }
     }
 
     fn write_file(&self, hash: &Hash, src: &mut impl Read) -> Result<()> {
@@ -97,9 +120,46 @@ impl Store {
         fs::create_dir_all(dir).map_err(io_err)?;
         let tmp = dir.join(format!(".write-{}-{}", std::process::id(), hash.to_hex()));
         let mut out = fs::File::create(&tmp).map_err(io_err)?;
-        io::copy(src, &mut out).map_err(io_err)?;
+        self.copy_in(src, &mut out).map_err(io_err)?;
         out.sync_all().map_err(io_err)?;
         self.place(&tmp, hash)
+    }
+
+    /// E6: seals every file that still lies here in the clear — once, when a store that was
+    /// unencrypted gets its key. Returns how many files were sealed.
+    #[cfg_attr(not(feature = "encryption"), allow(dead_code))]
+    pub(crate) fn seal_files(&self) -> Result<usize> {
+        let (Some(dir), Some(key)) = (self.files.as_deref(), &self.file_key) else {
+            return Ok(0);
+        };
+        let Ok(shards) = fs::read_dir(dir) else {
+            return Ok(0);
+        };
+        let mut sealed = 0;
+        for shard in shards.flatten() {
+            let Ok(files) = fs::read_dir(shard.path()) else {
+                continue;
+            };
+            for f in files.flatten() {
+                let path = f.path();
+                let name = f.file_name();
+                let Some(hash) = name.to_str().and_then(Hash::from_hex) else {
+                    continue;
+                };
+                let bytes = fs::read(&path).map_err(io_err)?;
+                // Already sealed (an interrupted run), unless it only looks like it.
+                if crypt::FileKey::is_sealed(&bytes) && key.open(&bytes).is_ok() {
+                    continue;
+                }
+                let tmp = dir.join(format!(".seal-{}-{}", std::process::id(), hash.to_hex()));
+                let mut out = fs::File::create(&tmp).map_err(io_err)?;
+                key.seal(&mut &bytes[..], &mut out).map_err(io_err)?;
+                out.sync_all().map_err(io_err)?;
+                fs::rename(&tmp, &path).map_err(io_err)?;
+                sealed += 1;
+            }
+        }
+        Ok(sealed)
     }
 
     /// Moves a finished temporary file to its place; a file that is already there stays.
@@ -124,10 +184,17 @@ impl Store {
         let Some(dir) = self.files.as_deref() else {
             return Ok(None);
         };
-        let bytes = match fs::read(Self::file_path(dir, hash)) {
+        let stored = match fs::read(Self::file_path(dir, hash)) {
             Ok(b) => b,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(io_err(e)),
+        };
+        // Sealed files are opened with the key. A file that is not sealed (from before the
+        // key, or one that merely starts like a sealed one) is taken as it is — the hash
+        // below decides either way.
+        let bytes = match &self.file_key {
+            Some(key) if crypt::FileKey::is_sealed(&stored) => key.open(&stored).unwrap_or(stored),
+            _ => stored,
         };
         if Hash(Sha256::digest(&bytes).into()) != *hash {
             return Err(Error::Files(format!("Datei {hash} ist beschädigt")));

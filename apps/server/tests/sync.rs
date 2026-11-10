@@ -10,7 +10,11 @@ use symbiot_sync::{Error, Remote, Report};
 
 /// The home server with its own key, set up for the person behind `words`.
 async fn home_server(words: &str) -> String {
-    let mut store = Store::open_in_memory(Signer::from_seed([50; 32])).unwrap();
+    home_server_with_key(words, 50).await
+}
+
+async fn home_server_with_key(words: &str, seed: u8) -> String {
+    let mut store = Store::open_in_memory(Signer::from_seed([seed; 32])).unwrap();
     store.certify_self(words, "Heimserver").unwrap();
     let app = symbiot_server::app(store, None, None);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -320,4 +324,85 @@ async fn deleted_and_home_only_content_stays_away() {
     }
     assert!(phone.lock().unwrap().verify().unwrap().ok);
     assert_eq!(titles(&pc), ["Nur am PC"], "the PC keeps its own");
+}
+
+/// H5 acceptance: the home server is lost. A new one — new key, same person — gets every
+/// chain back from one device: that device's own, the other device's, the adapter's and
+/// the old home server's. Nothing depends on a backup of the old key.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_new_home_server_gets_everything_back_from_one_device() {
+    let words = symbiot_store::new_words().unwrap();
+    let old = home_server(&words).await;
+    let pc = device(1, Some(&words), "PC");
+    let phone = device(2, Some(&words), "Handy");
+    let adapter = device(3, Some(&words), "telegram-import");
+    pc.lock()
+        .unwrap()
+        .create_node(NodeKind::Goal, "Vom PC", "")
+        .unwrap();
+    phone
+        .lock()
+        .unwrap()
+        .create_node(NodeKind::Goal, "Vom Handy", "")
+        .unwrap();
+    adapter
+        .lock()
+        .unwrap()
+        .record_evidence(vec![symbiot_core::Evidence {
+            id: "telegram:chat/1".into(),
+            kind: "schema:Message".into(),
+            at_ms: 1_700_000_000_000,
+            actors: vec![],
+            text: "Hallo".into(),
+            fields: vec![],
+            files: vec![],
+        }])
+        .unwrap();
+    // Something written at the old home server itself, through its web interface.
+    let made: Value = {
+        let url = format!("{old}/api/nodes");
+        tokio::task::spawn_blocking(move || {
+            ureq::post(&url)
+                .header(symbiot_server::SAME_ORIGIN_HEADER, "1")
+                .send_json(serde_json::json!({"kind": "goal", "title": "Am Heimserver"}))
+                .unwrap()
+                .body_mut()
+                .read_json::<Value>()
+                .unwrap()
+        })
+        .await
+        .unwrap()
+    };
+    assert_eq!(made["title"], "Am Heimserver");
+    for d in [&adapter, &phone, &pc, &phone] {
+        sync(d, &old).await.unwrap();
+    }
+    let all = ["Am Heimserver", "Vom Handy", "Vom PC"];
+    assert_eq!(titles(&pc), all);
+
+    // The old home server is gone. A new one knows nothing but the person.
+    let new = home_server_with_key(&words, 51).await;
+    assert!(titles_on_sz(&new).await.is_empty());
+    let r = sync(&pc, &new).await.unwrap();
+    assert!(r.relayed >= 5, "the other chains went along: {r:?}");
+    assert_eq!(titles_on_sz(&new).await, all);
+    let evidence: Value = http_get(&format!("{new}/api/evidence")).await;
+    assert_eq!(
+        evidence.as_array().unwrap().len(),
+        1,
+        "the adapter's raw data too"
+    );
+    let chains: Value = http_get(&format!("{new}/api/ledger/verify-all")).await;
+    let chains = chains.as_array().unwrap();
+    assert_eq!(
+        chains.len(),
+        5,
+        "new and old home server, PC, phone, adapter"
+    );
+    assert!(chains.iter().all(|c| c["ok"] == true));
+
+    // Nothing moves twice, and the phone finds everything at the new place.
+    assert_eq!(sync(&pc, &new).await.unwrap(), Report::default());
+    sync(&phone, &new).await.unwrap();
+    assert_eq!(titles(&phone), all);
 }

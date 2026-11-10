@@ -98,7 +98,9 @@ export default defineConfig({
     },
   ],
   webServer: [
-    server(8101),
+    // E6: this one runs on an encrypted store, so the whole app is tested with a key too.
+    // (A server built on Windows has no SQLCipher, see apps/server/Cargo.toml.)
+    server(8101, process.platform === "win32" ? {} : { SYMBIOT_DB_KEY: "5e".repeat(32) }),
     {
       // Stand-in for LiteLLM, so „Nächsten Schritt vorschlagen“ is tested without a real model.
       command: "node mock-llm.mjs",

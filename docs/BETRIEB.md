@@ -19,17 +19,55 @@ Tag vX.Y.Z ─► Release: Installer für Windows, Linux, macOS und das Android-
 | Was | Wo |
 |---|---|
 | Compose | `/opt/stacks/symbiot/compose.yaml` (Vorlage: [deploy/compose.yaml](../deploy/compose.yaml)) |
-| Daten | `/opt/stacks/symbiot/data`: `symbiot.db`, `device.key` und `files/` (Fotos und Anhänge der Rohdaten). Gehört uid 65532. **Gehört ins Backup**, denn `device.key` ist die Identität des Servers. |
+| Daten | `/opt/stacks/symbiot/data`: `symbiot.db` und `files/` (Fotos und Anhänge der Rohdaten), ohne Schlüssel auch `device.key`. Gehört uid 65532. Mit `SYMBIOT_DB_KEY` verschlüsselt, siehe unten. |
 | Lokal | `http://127.0.0.1:8100` (`/health`, `/api/…`, UI) |
 | Tailnet | `https://heimserver.example.ts.net:8449`, Eintrag in `/opt/stacks/tailscale/config/serve.json` |
 | Gesundheit | Docker-HEALTHCHECK `symbiot-server --health` → Komodo und Beszel sehen `healthy`/`unhealthy` |
 | Logs | JSON nach stdout → Dozzle. Level `ERROR` bei Speicherfehlern und **gebrochener Kette** |
 
-**Backup zurückspielen (2026-11-10, PLAN H5):** Nur gefahrlos, wenn der Heimserver seit dem Backup nichts selbst
-geschrieben hat (keine Bedienung über die Web-Oberfläche, kein Import dort). Sonst kennen die Geräte schon spätere
-Einträge seiner Kette, und was er danach schreibt, passt nicht mehr dazu: Die Geräte lehnen seine Kette dann
-dauerhaft ab. Einen Weg zurück gibt es in der App noch nicht. Daten und Dateien liegen bis H5 unverschlüsselt im
-Datenordner.
+## Verschlüsselung (H5, E6)
+
+Mit einem Schlüssel verschlüsselt der Heimserver die Datenbank (SQLCipher), versiegelt die Dateien und legt seinen
+Geräteschlüssel in die Datenbank statt in `device.key`. Einmal einrichten:
+
+1. Schlüssel erzeugen und **im Passwort-Manager ablegen**:
+   ```bash
+   openssl rand -hex 32
+   ```
+2. Auf dem Heimserver in `/opt/stacks/symbiot/.env` eintragen (die Datei darf nur root lesen):
+   ```bash
+   ssh -t heimserver 'sudo sh -c "umask 077; echo SYMBIOT_DB_KEY=HIER_DEN_SCHLUESSEL >> /opt/stacks/symbiot/.env"'
+   ```
+3. Container neu starten (in Komodo: *Redeploy*). Beim Start stellt der Server den Bestand um; im Log steht
+   `"encrypted":true`. Die alte Datenbank und `device.key` werden überschrieben und entfernt.
+
+Danach startet der Server ohne den Schlüssel nicht mehr. Ohne Schlüssel läuft er wie bisher und schreibt beim Start
+eine Warnung ins Log. Statt `SYMBIOT_DB_KEY` geht auch `SYMBIOT_DB_KEY_FILE` mit dem Pfad einer Datei (Docker-Secret).
+
+**Was das schützt und was nicht:** Der Schlüssel liegt in `.env` neben den Daten. Geschützt sind Kopien des
+Datenordners: ein Backup, eine ausgebaute oder weitergegebene Platte. Nicht geschützt ist ein laufender Heimserver,
+den jemand übernimmt. Nimm `.env` deshalb nicht ins selbe Backup wie `data/`.
+
+**Die Apps** (Desktop, Android) verschlüsseln noch nicht selbst; dort schützt die Verschlüsselung des
+Betriebssystems (BitLocker, FileVault, LUKS; auf Android die Gerätesperre). `symbiot-import` verschlüsselt den
+Ordner seines Adapters mit demselben `SYMBIOT_DB_KEY`, wenn es mit `--features encryption` gebaut ist.
+
+## Heimserver verloren oder neu aufsetzen (H5)
+
+Jedes Gerät hält alle Ketten und Dateien. Ein Backup des Heimservers braucht es deshalb nicht, um wieder
+hochzukommen:
+
+1. Heimserver mit **leerem** Datenordner starten (neuer Geräteschlüssel).
+2. `https://heimserver.example.ts.net:8449` öffnen, unter „Geräte“ den vorhandenen Schlüssel eingeben (24 Wörter).
+3. An einem Gerät „Jetzt abgleichen“. Es schickt dem neuen Heimserver alle Ketten, die ihm fehlen: die eigene,
+   die der anderen Geräte, die der Adapter und die des alten Heimservers. Danach die Dateien.
+4. Den alten Heimserver unter „Geräte“ widerrufen, falls seine Platte in fremde Hände geraten sein kann.
+
+Verloren ist nur, was allein auf dem alten Heimserver lag: Knoten, die dort als „nicht exportierbar“ entstanden.
+
+**Kein altes Backup zurückspielen und weiterlaufen lassen.** Hat der Heimserver seit dem Backup selbst etwas
+geschrieben, kennen die Geräte schon spätere Einträge seiner Kette. Was er danach schreibt, passt nicht mehr dazu,
+und die Geräte lehnen seine Kette dauerhaft ab. Dann hilft nur der Weg oben.
 
 ## Wer schreiben darf (H4)
 

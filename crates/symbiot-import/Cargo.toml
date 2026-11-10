@@ -10,6 +10,10 @@ repository.workspace = true
 name = "symbiot-import"
 path = "src/main.rs"
 
+[features]
+# E6: the adapter's own store can be encrypted with SYMBIOT_DB_KEY, like the home server's.
+encryption = ["symbiot-store/encryption"]
+
 [dependencies]
 hex = "0.4.3"
 mail-parser = "1.0.1"
