@@ -132,14 +132,16 @@ baute die Projektion neu. Ein einzelner neuer Eintrag kostete 0,2 s bei 50 000 N
 - **Abgenommen durch:** `crates/symbiot-store/tests/abgleich.rs` (Kosten bei achtfacher Datenmenge, Seiten,
   Upgrade einer älteren Datenbank).
 
-#### H4 — Web-API nimmt nichts von fremden Seiten *(E12, #49)*
-**Heute:** `POST /api/import` prüft keine Herkunft. Eine fremde Webseite im Browser eines Tailnet-Geräts kann
-Rohdaten in die Kette des Heimservers schreiben, wenn sie die Adresse kennt.
-- Jede schreibende Route unter `/api` außer dem signierten Abgleich verlangt eine Anfrage derselben Herkunft:
-  eigener Header der Oberfläche, dazu `Sec-Fetch-Site` und `Origin`, wo der Browser sie schickt.
-- Die Web-Version bekommt dieselbe Content-Security-Policy wie die Desktop-App.
-- **Fertig, wenn:** Schreibende Anfragen ohne den Header oder von fremder Herkunft werden abgelehnt (API-Test), die
-  Oberfläche läuft unverändert (E2E).
+#### H4 — Web-API nimmt nichts von fremden Seiten *(E12, #49 · umgesetzt)*
+**War:** `POST /api/import` prüfte keine Herkunft. Eine fremde Webseite im Browser eines Tailnet-Geräts konnte
+Rohdaten in die Kette des Heimservers schreiben, wenn sie die Adresse kannte.
+- Jede schreibende Route unter `/api` außer dem signierten Abgleich verlangt den Header `x-symbiot`, den nur die
+  eigene Oberfläche schickt. Eine fremde Seite müsste dafür erst fragen (CORS-Preflight), und der Server erlaubt
+  das nie. Meldet der Browser eine fremde Herkunft (`Sec-Fetch-Site`), wird die Anfrage ebenfalls abgelehnt.
+- Die Web-Version bekommt eine Content-Security-Policy wie die Desktop-App: Skripte nur von hier, das kleine
+  Start-Skript der Seite über seinen Hash. Antworten dürfen nicht in fremde Seiten eingebettet werden.
+- **Abgenommen durch:** `writes_from_outside_the_interface_are_refused` in `apps/server/tests/api.rs`; die
+  E2E-Tests laufen mit der Policy.
 
 #### H6 — Die 24 Wörter bleiben selten *(E5, E7, #50)*
 **Heute:** Die Web-Oberfläche schickt die Wörter an den Heimserver. Jeder Import-Adapter braucht sie einmal. Der
@@ -200,6 +202,7 @@ oder deckt einen Weg nicht ab.
 | Die Wörter werden nie gespeichert und selten benutzt | E5 | – | offen (H6) |
 | Der Speicher ist verschlüsselt | E6 | – | offen (H5) |
 | Texte von außen sind Daten, nie Auftrag | E12 | – | offen, wird mit M8 Pflicht |
+| Fremde Webseiten können nichts schreiben | E12 | `apps/server/tests/api.rs` | hält (H4) |
 | Kein Vorschlag ändert Daten ohne Klick | F4, E16 | `api.rs`, `assistent.spec.ts` | hält |
 | Ein zweiter Import ändert nichts | E14 | `crates/symbiot-import/tests/cli.rs` | hält |
 | Abgleich hängt nicht an der Datenmenge | E14 | `crates/symbiot-store/tests/abgleich.rs` | hält (H3) |

@@ -8,10 +8,12 @@ use axum::body::Bytes;
 use axum::extract::DefaultBodyLimit;
 use axum::extract::{OriginalUri, Path, Query, State};
 use axum::http::header;
-use axum::http::{HeaderMap, Method, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
+use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use symbiot_ai::Advisor;
 use symbiot_core::action::Suggestion;
@@ -99,14 +101,120 @@ pub fn app(store: Store, ui_dir: Option<PathBuf>, ai: Option<Arc<dyn Advisor>>) 
         .nest("/api", api)
         .with_state(Arc::new(state));
 
+    let mut csp = None;
     let router = match ui_dir {
         Some(dir) => {
             let index = dir.join("index.html");
+            csp = std::fs::read_to_string(&index)
+                .ok()
+                .and_then(|html| HeaderValue::from_str(&content_security_policy(&html)).ok());
             router.fallback_service(ServeDir::new(dir).fallback(ServeFile::new(index)))
         }
         None => router,
     };
-    router.layer(TraceLayer::new_for_http())
+    router
+        .layer(axum::middleware::from_fn(move |req, next| {
+            guard(csp.clone(), req, next)
+        }))
+        .layer(TraceLayer::new_for_http())
+}
+
+/// H4: the header the interface sends with every request that changes something. A page of
+/// another origin cannot send it without asking first (CORS preflight), and this server never
+/// says yes.
+pub const SAME_ORIGIN_HEADER: &str = "x-symbiot";
+
+/// H4: the tailnet is the border, there is no login — so a web page of another origin, open in
+/// a browser on a device in the tailnet, must not be able to write here. Every request that
+/// changes something must come from this server's own interface. The sync routes are left
+/// out: they are signed with a device key.
+async fn guard(csp: Option<HeaderValue>, req: axum::extract::Request, next: Next) -> Response {
+    let path = req.uri().path();
+    let api = path.starts_with("/api/");
+    let signed = path.starts_with("/api/sync/");
+    let reads = [Method::GET, Method::HEAD, Method::OPTIONS].contains(req.method());
+    if api && !signed && !reads {
+        let own = req.headers().contains_key(SAME_ORIGIN_HEADER);
+        // Browsers say where a request comes from; other clients (tests, tools) do not.
+        let foreign = req
+            .headers()
+            .get("sec-fetch-site")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|site| !matches!(site, "same-origin" | "none"));
+        if !own || foreign {
+            tracing::warn!(path, foreign, "write from outside the interface refused");
+            return ApiError(
+                StatusCode::FORBIDDEN,
+                "Diese Anfrage kommt nicht von der Symbiot-Oberfläche".into(),
+            )
+            .into_response();
+        }
+    }
+    let mut res = next.run(req).await;
+    let headers = res.headers_mut();
+    // Nothing here may be embedded by a page of another origin.
+    headers.insert(
+        "cross-origin-resource-policy",
+        HeaderValue::from_static("same-origin"),
+    );
+    if !api {
+        headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+        if let Some(csp) = csp {
+            headers.insert(header::CONTENT_SECURITY_POLICY, csp);
+        }
+    }
+    res
+}
+
+/// The policy for the web version, as strict as the desktop app's: scripts only from here.
+/// The page that trunk builds starts the app with a small inline script; it is allowed by
+/// its hash, so no other inline script can run.
+fn content_security_policy(index_html: &str) -> String {
+    use sha2::Digest as _;
+    let mut hashes = String::new();
+    let mut rest = index_html;
+    while let Some(start) = rest.find("<script") {
+        let after = &rest[start..];
+        let Some(open_end) = after.find('>') else {
+            break;
+        };
+        let Some(close) = after.find("</script>") else {
+            break;
+        };
+        let (tag, body) = (&after[..open_end], &after[open_end + 1..close]);
+        if !tag.contains(" src=") && !body.trim().is_empty() {
+            let digest = sha2::Sha256::digest(body.as_bytes());
+            let b64 = base64::engine::general_purpose::STANDARD.encode(digest);
+            hashes.push_str(&format!(" 'sha256-{b64}'"));
+        }
+        rest = &after[close + "</script>".len()..];
+    }
+    format!(
+        "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'{hashes}; \
+         style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; \
+         connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; \
+         frame-ancestors 'none'"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_policy_allows_the_inline_start_script_by_hash_and_nothing_else() {
+        let html = r#"<html><head><script type="module">import init from '/a.js'; init();</script>
+            <script src="/b.js"></script></head><body></body></html>"#;
+        let csp = content_security_policy(html);
+        // sha256 of exactly the text between the tags.
+        assert!(
+            csp.contains("'sha256-OmsKZ7FdjngXv78J3xPM9wIheFofQWOF5uRnAv7cVTc='"),
+            "{csp}"
+        );
+        assert_eq!(csp.matches("'sha256-").count(), 1, "only the inline script");
+        assert!(csp.contains("script-src 'self' 'wasm-unsafe-eval' 'sha256-"));
+        assert!(content_security_policy("<html></html>").contains("script-src 'self'"));
+    }
 }
 
 /// Routes that carry chains and files. Only they may send large bodies: chains arrive in
