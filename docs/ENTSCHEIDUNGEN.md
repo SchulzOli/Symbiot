@@ -486,7 +486,7 @@ Entschieden:
   Nachrichten. M9 beginnt mit einer Messung, ob SQLite für die Auswertungen reicht.
 - **M6 (Sensor) rückt ans Ende.** Er beantwortet keine der Fragen aus E14; die `no_std`-Garantie hält die CI.
 
-Nachgewiesen mit Experimenten (die ersten beiden sind seit H1 und H2 behoben): Text gelöschter Knoten in Einträgen der Arten 28, 5 und 2; Text eines nicht
+Nachgewiesen mit Experimenten (alle drei sind seit H1, H2 und H3 behoben): Text gelöschter Knoten in Einträgen der Arten 28, 5 und 2; Text eines nicht
 exportierbaren Knotens im Abgleich (Art 28); Kosten eines Empfangs wachsen linear mit den gespeicherten Rohdaten
 (0,2 s bei 50 000 Nachrichten, 0,5 s bei 200 000, für einen einzigen neuen Eintrag). Aus dem Code gelesen:
 `POST /api/import` ohne Prüfung der Herkunft; Backup und Wiederherstellung des Heimservers.

@@ -307,6 +307,18 @@ pub(crate) fn project_source(tx: &Connection, change: &Change) -> Result<()> {
     Ok(())
 }
 
+/// Whether any source was ever revoked — only then is there raw data to remove.
+pub(crate) fn any_revoked(conn: &Connection) -> Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM source_grant WHERE revoked_ms IS NOT NULL LIMIT 1",
+            [],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
 /// E2 for revoked sources: raw data loaded up to the revocation loses its content — in the
 /// projection always, in the ledger where the whole batch is covered. Returns the items.
 pub(crate) fn prune_revoked(tx: &Connection) -> Result<usize> {

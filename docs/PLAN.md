@@ -118,16 +118,19 @@ abgelehnten Vorschlag (Art 5) und in einer Bearbeitung, die ein anderes Gerät n
   spricht, bleibt zu Hause. Das gilt auch, wenn der Knoten nur ausgeblendet wurde (nicht löschbar).
 - **Abgenommen durch:** `not_exportable_text_stays_home_whatever_made_it` in `zusagen.rs`.
 
-#### H3 — Abgleich hängt nicht an der Datenmenge *(E14, #48)*
-**Heute:** Jeder Empfang prüft die ganze Kette von vorn, lädt alle Ketten samt Rohdaten in den Arbeitsspeicher und
-baut die Projektion neu. Ein einzelner neuer Eintrag kostet 0,2 s bei 50 000 Nachrichten und 0,5 s bei 200 000.
-- Neue Einträge werden nur gegen die bekannte Spitze der Kette geprüft. „Kette prüfen“ bleibt die volle Prüfung.
-- `ledger` bekommt Spalten für Art und Zeit. Neuaufbau und Vertrauen lesen nur Einträge des Graphen
-  und nie den Inhalt von Rohdaten-Bündeln.
-- Ketten werden in Seiten geholt, wie sie schon in Seiten gesendet werden.
-- Der Server erledigt Speicherarbeit außerhalb der async-Threads, damit `/health` während eines Imports antwortet.
-- **Fertig, wenn:** Ein Test zeigt, dass der Empfang eines Eintrags bei 200 000 Belegen nicht merklich länger
-  dauert als bei 50 000. Schrittweises Anwenden und voller Neuaufbau liefern dieselbe Projektion.
+#### H3 — Abgleich hängt nicht an der Datenmenge *(E14, #48 · umgesetzt)*
+**War:** Jeder Empfang prüfte die ganze Kette von vorn, lud alle Ketten samt Rohdaten in den Arbeitsspeicher und
+baute die Projektion neu. Ein einzelner neuer Eintrag kostete 0,2 s bei 50 000 Nachrichten und 0,5 s bei 200 000.
+- Neue Einträge werden nur gegen die bekannte Spitze der Kette geprüft (`verify_after`). „Kette prüfen“ bleibt die
+  volle Prüfung.
+- `ledger` kennt Art und Zeit jedes Eintrags, `chain_tip` die Spitze jeder Kette (Schema 11). Neuaufbau und
+  Vertrauen lesen nur Einträge des Graphen bzw. Bestätigungen und nie den Inhalt von Rohdaten-Bündeln. Ein Bündel
+  geht direkt in seine Tabelle; nur Einträge des Graphen bauen die Projektion neu.
+- Ketten gehen in beiden Richtungen in Seiten zu 500 Einträgen.
+- Der Server erledigt Import, Empfang und Seiten außerhalb der async-Threads, `/health` antwortet währenddessen.
+- **Gemessen:** derselbe einzelne Eintrag kostet jetzt 0,5 ms bei 50 000 und 2,5 ms bei 200 000 Nachrichten.
+- **Abgenommen durch:** `crates/symbiot-store/tests/abgleich.rs` (Kosten bei achtfacher Datenmenge, Seiten,
+  Upgrade einer älteren Datenbank).
 
 #### H4 — Web-API nimmt nichts von fremden Seiten *(E12, #49)*
 **Heute:** `POST /api/import` prüft keine Herkunft. Eine fremde Webseite im Browser eines Tailnet-Geräts kann
@@ -199,7 +202,7 @@ oder deckt einen Weg nicht ab.
 | Texte von außen sind Daten, nie Auftrag | E12 | – | offen, wird mit M8 Pflicht |
 | Kein Vorschlag ändert Daten ohne Klick | F4, E16 | `api.rs`, `assistent.spec.ts` | hält |
 | Ein zweiter Import ändert nichts | E14 | `crates/symbiot-import/tests/cli.rs` | hält |
-| Abgleich hängt nicht an der Datenmenge | E14 | – | offen (H3) |
+| Abgleich hängt nicht an der Datenmenge | E14 | `crates/symbiot-store/tests/abgleich.rs` | hält (H3) |
 
 ### Danach, in dieser Reihenfolge
 

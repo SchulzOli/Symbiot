@@ -26,7 +26,7 @@ pub use edge::{Edge, EdgeKind};
 pub use evidence::{Actor, Evidence, FileRef};
 pub use ledger::{
     ContentRef, Decode, Head, LedgerEntry, Op, Part, Signer, VerifyError, VerifyReport,
-    build_chain, verify_chain, verify_message,
+    build_chain, verify_after, verify_chain, verify_message,
 };
 pub use node::{ApplyError, Change, Lookup, Node, NodeKind, Policy, Replay, State, replay};
 pub use person::{Device, Person, Trust};

@@ -12,7 +12,7 @@ use symbiot_core::evidence::{self, Evidence};
 use symbiot_core::{Change, Hash, LedgerEntry, Op, PubKey, kind};
 
 use crate::sources::USED;
-use crate::{Error, Known, Result, Store, all_chains, append_in};
+use crate::{Error, Known, Result, Store, append_in};
 
 /// What [`Store::record_evidence`] did.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
@@ -360,10 +360,13 @@ pub(crate) fn receive_evidence(tx: &Connection, e: &LedgerEntry) -> Result<()> {
 /// Fills the evidence table from the ledger, e.g. after an upgrade.
 pub(crate) fn rebuild_evidence(tx: &Connection) -> Result<()> {
     tx.execute_batch("DELETE FROM evidence; DELETE FROM evidence_fts; DELETE FROM evidence_file; DELETE FROM evidence_actor;")?;
-    for chain in all_chains(tx)? {
-        for e in &chain {
-            receive_evidence(tx, e)?;
-        }
+    // One batch at a time: the raw data of a life does not fit into memory at once.
+    let mut stmt = tx.prepare(
+        "SELECT head, hash, sig, content FROM ledger WHERE kind = ?1 ORDER BY author, seq",
+    )?;
+    let mut rows = stmt.query([kind::EVIDENCE_BATCH as i64])?;
+    while let Some(row) = rows.next()? {
+        receive_evidence(tx, &crate::decode_entry(crate::raw_entry(row)?)?)?;
     }
     Ok(())
 }

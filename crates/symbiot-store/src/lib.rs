@@ -24,7 +24,9 @@ use symbiot_core::{
 /// 8: `evidence_actor` (identifiers per item) and `identity_decision` (#31); rebuilt.
 /// 9: `evidence.scope`, `evidence.loaded_ms` and `source_grant` (#44); rebuilt.
 /// 10: `deleted` (tombstones) and `entry_about` (which entries speak about a node), H1; rebuilt.
-const SCHEMA_VERSION: i64 = 10;
+/// 11: `ledger.kind`, `ledger.ts_ms` and `chain_tip` (H3): reading the graph, the devices or a
+///     tip no longer touches raw data; filled from the heads on upgrade.
+const SCHEMA_VERSION: i64 = 11;
 
 mod actions;
 mod evidence;
@@ -183,7 +185,15 @@ impl Store {
                  sig     BLOB NOT NULL,
                  head    BLOB NOT NULL,
                  content BLOB,
+                 kind    INTEGER NOT NULL DEFAULT 0,
+                 ts_ms   INTEGER NOT NULL DEFAULT 0,
                  PRIMARY KEY (author, seq)
+             );
+             CREATE TABLE IF NOT EXISTS chain_tip (
+                 author BLOB PRIMARY KEY,
+                 seq    INTEGER NOT NULL,
+                 hash   BLOB NOT NULL,
+                 ts_ms  INTEGER NOT NULL
              );
              CREATE TABLE IF NOT EXISTS nodes (
                  id         BLOB PRIMARY KEY,
@@ -234,6 +244,7 @@ impl Store {
                  PRIMARY KEY (author, seq, hash)
              );",
         )?;
+        index_ledger(&conn)?;
         if version > 0 && version < 9 {
             conn.execute_batch(evidence::DROP)?;
         }
@@ -666,8 +677,8 @@ fn read_deleted(conn: &Connection, node: &NodeId) -> Result<Option<bool>> {
 
 fn insert_entry(tx: &Connection, entry: &LedgerEntry) -> Result<()> {
     tx.execute(
-        "INSERT INTO ledger (author, seq, hash, sig, head, content)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO ledger (author, seq, hash, sig, head, content, kind, ts_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             entry.head.author.0.as_slice(),
             entry.head.seq as i64,
@@ -678,25 +689,96 @@ fn insert_entry(tx: &Connection, entry: &LedgerEntry) -> Result<()> {
                 .content
                 .as_ref()
                 .map(postcard::to_allocvec)
-                .transpose()?
+                .transpose()?,
+            entry.head.kind as i64,
+            entry.head.ts_ms as i64
+        ],
+    )?;
+    tx.execute(
+        "INSERT INTO chain_tip (author, seq, hash, ts_ms) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT (author) DO UPDATE SET seq = ?2, hash = ?3, ts_ms = ?4 WHERE ?2 > seq",
+        params![
+            entry.head.author.0.as_slice(),
+            entry.head.seq as i64,
+            entry.hash.0.as_slice(),
+            entry.head.ts_ms as i64
         ],
     )?;
     Ok(())
 }
 
-/// One device's chain as stored, oldest first.
-fn chain_of(conn: &Connection, author: &PubKey) -> Result<Vec<LedgerEntry>> {
-    let mut stmt =
-        conn.prepare("SELECT head, hash, sig, content FROM ledger WHERE author = ?1 ORDER BY seq")?;
-    let rows = stmt.query_map([author.0.as_slice()], raw_entry)?;
-    rows.map(|r| decode_entry(r?)).collect()
+/// H3: gives a ledger written before schema 11 its `kind` and `ts_ms` columns (read from the
+/// signed heads) and fills `chain_tip`. A ledger that has them is left alone.
+fn index_ledger(conn: &Connection) -> Result<()> {
+    let has_kind: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('ledger') WHERE name = 'kind'",
+        [],
+        |r| r.get(0),
+    )?;
+    let tx = conn.unchecked_transaction()?;
+    if has_kind == 0 {
+        tx.execute_batch(
+            "ALTER TABLE ledger ADD COLUMN kind INTEGER NOT NULL DEFAULT 0;
+             ALTER TABLE ledger ADD COLUMN ts_ms INTEGER NOT NULL DEFAULT 0;",
+        )?;
+        let mut read = tx.prepare("SELECT rowid, head FROM ledger")?;
+        let mut write = tx.prepare("UPDATE ledger SET kind = ?2, ts_ms = ?3 WHERE rowid = ?1")?;
+        let mut rows = read.query([])?;
+        while let Some(row) = rows.next()? {
+            let head: Head = postcard::from_bytes(&row.get::<_, Vec<u8>>(1)?)?;
+            write.execute(params![
+                row.get::<_, i64>(0)?,
+                head.kind as i64,
+                head.ts_ms as i64
+            ])?;
+        }
+    }
+    tx.execute_batch(
+        "CREATE INDEX IF NOT EXISTS ledger_kind ON ledger (kind, author, seq);
+         INSERT OR IGNORE INTO chain_tip (author, seq, hash, ts_ms)
+             SELECT author, seq, hash, ts_ms FROM ledger AS l
+             WHERE seq = (SELECT MAX(seq) FROM ledger WHERE author = l.author);",
+    )?;
+    tx.commit()?;
+    Ok(())
 }
 
-/// Every chain in the ledger, each oldest first.
+/// Every chain in the ledger, each oldest first. Reads everything, raw data included: only
+/// for checking the chains, never on the way of a sync (H3).
 fn all_chains(conn: &Connection) -> Result<Vec<Vec<LedgerEntry>>> {
+    chains_where(conn, "1")
+}
+
+/// The entries that shape the graph, per chain: everything but raw-data batches (E14), which
+/// have their own table and would otherwise be read, whole, on every rebuild.
+fn graph_chains(conn: &Connection) -> Result<Vec<Vec<LedgerEntry>>> {
+    chains_where(
+        conn,
+        &format!("kind != {}", symbiot_core::kind::EVIDENCE_BATCH),
+    )
+}
+
+/// Certificates and revocations of devices (E5) from every chain — all that trust needs.
+fn device_entries(conn: &Connection) -> Result<Vec<LedgerEntry>> {
+    Ok(chains_where(
+        conn,
+        &format!(
+            "kind IN ({}, {})",
+            symbiot_core::kind::CERTIFY_DEVICE,
+            symbiot_core::kind::REVOKE_DEVICE
+        ),
+    )?
+    .into_iter()
+    .flatten()
+    .collect())
+}
+
+/// The entries that meet `condition` (SQL over the ledger's columns), grouped by chain.
+fn chains_where(conn: &Connection, condition: &str) -> Result<Vec<Vec<LedgerEntry>>> {
     let mut chains: Vec<Vec<LedgerEntry>> = Vec::new();
-    let mut stmt =
-        conn.prepare("SELECT head, hash, sig, content FROM ledger ORDER BY author, seq")?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT head, hash, sig, content FROM ledger WHERE {condition} ORDER BY author, seq"
+    ))?;
     let rows = stmt.query_map([], raw_entry)?;
     for row in rows {
         let e = decode_entry(row?)?;
@@ -858,29 +940,16 @@ impl Store {
 /// a full rebuild.
 fn next_ts(conn: &Connection) -> Result<u64> {
     // Every chain is written this way, so its tip holds its newest time.
-    let mut stmt = conn.prepare(
-        "SELECT head FROM ledger AS l
-         WHERE seq = (SELECT MAX(seq) FROM ledger WHERE author = l.author)",
-    )?;
-    let tips = stmt.query_map([], |r| r.get::<_, Vec<u8>>(0))?;
-    let mut newest = None;
-    for head in tips {
-        let ts = postcard::from_bytes::<Head>(&head?)?.ts_ms;
-        newest = newest.max(Some(ts));
-    }
-    Ok(now_ms().max(newest.map_or(0, |t| t + 1)))
+    let newest: Option<i64> =
+        conn.query_row("SELECT MAX(ts_ms) FROM chain_tip", [], |r| r.get(0))?;
+    Ok(now_ms().max(newest.map_or(0, |t| t as u64 + 1)))
 }
 
 /// Builds the projection tables again from every chain in the ledger.
 /// Only this device's chain and those of devices of the same person (E5) count.
 fn rebuild_projection(tx: &Connection, me: &PubKey) -> Result<()> {
-    let mut chains = all_chains(tx)?;
-    // Raw data (E14) does not touch the graph and has its own table: leave it out of the replay,
-    // so a rebuild does not decode every item ever loaded.
-    for c in &mut chains {
-        c.retain(|e| e.head.kind != symbiot_core::kind::EVIDENCE_BATCH);
-    }
-    chains.retain(|c| !c.is_empty());
+    // Raw data (E14) does not touch the graph and has its own table: it is not even read.
+    let chains = graph_chains(tx)?;
     let refs: Vec<&[LedgerEntry]> = chains.iter().map(Vec::as_slice).collect();
     let person = refs
         .iter()

@@ -193,6 +193,8 @@ impl Remote {
         Self::json(&self.call(store, "GET", "/api/sync/heads", None)?)
     }
 
+    /// One page of `author`'s chain after `after`: at most [`PUSH_CHUNK`] entries. A home
+    /// server from before H3 ignores the limit and answers with the whole rest.
     pub fn pull(
         &self,
         store: &Mutex<Store>,
@@ -200,8 +202,8 @@ impl Remote {
         after: Option<u64>,
     ) -> Result<Vec<LedgerEntry>, Error> {
         let path = match after {
-            Some(a) => format!("/api/sync/chains/{author}?after={a}"),
-            None => format!("/api/sync/chains/{author}"),
+            Some(a) => format!("/api/sync/chains/{author}?after={a}&limit={PUSH_CHUNK}"),
+            None => format!("/api/sync/chains/{author}?limit={PUSH_CHUNK}"),
         };
         Self::json(&self.call(store, "GET", &path, None)?)
     }
@@ -293,19 +295,30 @@ pub fn sync(store: &Mutex<Store>, remote: &Remote) -> Result<Report, Error> {
     let mut report = Report::default();
 
     let theirs = remote.heads(store)?;
-    let known_there = theirs.iter().find(|h| h.author == me).map(|h| h.seq);
-    let mine = lock(store).chain_since(&me, known_there)?;
-    if !mine.is_empty() {
-        report.sent = remote.push_all(store, &mine)?;
+    // Page by page, in both directions: a chain of any length never has to fit into memory or
+    // into one request (H3).
+    let mut after = theirs.iter().find(|h| h.author == me).map(|h| h.seq);
+    loop {
+        let page = lock(store).chain_page(&me, after, PUSH_CHUNK)?;
+        let Some(last) = page.last() else { break };
+        after = Some(last.head.seq);
+        report.sent += remote.push(store, &page)?.received;
     }
 
     for head in theirs.iter().filter(|h| h.author != me) {
-        let here = lock(store).tip(&head.author)?.map(|t| t.seq);
-        if here.is_some_and(|s| s >= head.seq) {
-            continue;
+        let mut here = lock(store).tip(&head.author)?.map(|t| t.seq);
+        while here.is_none_or(|s| s < head.seq) {
+            let entries = remote.pull(store, &head.author, here)?;
+            if entries.is_empty() {
+                break;
+            }
+            report.received += lock(store).receive(entries)?;
+            let now = lock(store).tip(&head.author)?.map(|t| t.seq);
+            if now == here {
+                break;
+            }
+            here = now;
         }
-        let entries = remote.pull(store, &head.author, here)?;
-        report.received += lock(store).receive(entries)?;
     }
 
     // #28: files after chains, so both sides know which files the raw data references.

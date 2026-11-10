@@ -72,8 +72,9 @@ Ein Gedächtnis auf allen Geräten.
 - **Fertig, wenn:** Offline am PC angelegte Knoten nach dem Wiederverbinden auf dem Heimserver und auf dem zweiten Gerät erscheinen. Eine manipulierte Kette wird abgelehnt.
   ✅ `apps/server/tests/sync.rs` (Heimserver als echter Server, zwei Geräte), `e2e/tests/geraete.spec.ts` (Einrichtung).
   Nicht in M4: Checkpoints und `Witness`-Einträge (E13), Verschlüsselung (E6).
-- **Bekannte Lücke (2026-11-10, PLAN H3):** Jeder Empfang prüft die ganze Kette von vorn und baut die Projektion
-  neu. Der Abgleich wird deshalb mit der Menge der Rohdaten langsamer.
+- **H3 (2026-11-10):** Ein Empfang prüft nur die neuen Einträge gegen die Spitze der Kette und liest keine
+  Rohdaten. Ketten gehen in beiden Richtungen in Seiten zu 500 Einträgen
+  (`GET /api/sync/chains/{gerät}?after=N&limit=500`). ✅ `crates/symbiot-store/tests/abgleich.rs`.
 
 ## F6 — Überall *(M5)*
 Symbiot auf dem Handy.

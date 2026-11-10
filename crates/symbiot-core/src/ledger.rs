@@ -733,21 +733,32 @@ pub fn verify_chain(entries: &[LedgerEntry]) -> Result<usize, VerifyError> {
     let Some(first) = entries.first() else {
         return Ok(0);
     };
-    let author = first.head.author;
-    let key =
-        VerifyingKey::from_bytes(&author.0).map_err(|_| VerifyError::BadSignature { seq: 0 })?;
+    verify_after(&first.head.author, None, entries)
+}
 
-    let mut prev = Hash::ZERO;
-    for (i, e) in entries.iter().enumerate() {
+/// Verifies entries that continue `author`'s chain after `tip` — its last entry already
+/// verified, as `(seq, hash)`; `None` if the chain starts here. So taking in new entries costs
+/// as much as they are long, not as much as the whole chain (H3). Returns the number of entries.
+pub fn verify_after(
+    author: &PubKey,
+    tip: Option<(u64, Hash)>,
+    entries: &[LedgerEntry],
+) -> Result<usize, VerifyError> {
+    let (mut expected, mut prev) = match tip {
+        Some((seq, hash)) => (seq + 1, hash),
+        None => (0, Hash::ZERO),
+    };
+    let key = VerifyingKey::from_bytes(&author.0)
+        .map_err(|_| VerifyError::BadSignature { seq: expected })?;
+    for e in entries {
         let h = &e.head;
-        let expected = i as u64;
         if h.seq != expected {
             return Err(VerifyError::WrongSeq {
                 expected,
                 found: h.seq,
             });
         }
-        if h.author != author {
+        if h.author != *author {
             return Err(VerifyError::ForeignAuthor { seq: h.seq });
         }
         if h.prev != prev {
@@ -764,6 +775,7 @@ pub fn verify_chain(entries: &[LedgerEntry]) -> Result<usize, VerifyError> {
             return Err(VerifyError::BadContent { seq: h.seq });
         }
         prev = e.hash;
+        expected += 1;
     }
     Ok(entries.len())
 }
@@ -989,6 +1001,40 @@ mod tests {
         let back: Vec<LedgerEntry> =
             postcard::from_bytes(&postcard::to_allocvec(&chain).unwrap()).unwrap();
         assert_eq!(verify_chain(&back), Ok(3));
+    }
+
+    /// H3: a run of new entries verifies against the tip alone, and only against the right one.
+    #[test]
+    fn new_entries_verify_against_the_tip() {
+        let c = chain(6);
+        let author = signer().public();
+        let tip = Some((2, c[2].hash));
+        assert_eq!(verify_after(&author, tip, &c[3..]), Ok(3));
+        assert_eq!(verify_after(&author, None, &c), Ok(6));
+        assert_eq!(verify_after(&author, tip, &[]), Ok(0));
+        // A gap, a wrong predecessor, a foreign chain.
+        assert_eq!(
+            verify_after(&author, tip, &c[4..]),
+            Err(VerifyError::WrongSeq {
+                expected: 3,
+                found: 4
+            })
+        );
+        assert_eq!(
+            verify_after(&author, Some((2, c[1].hash)), &c[3..]),
+            Err(VerifyError::BrokenLink { seq: 3 })
+        );
+        let other = Signer::from_seed([9; 32]).public();
+        assert_eq!(
+            verify_after(&other, tip, &c[3..]),
+            Err(VerifyError::ForeignAuthor { seq: 3 })
+        );
+        let mut changed = c[3..].to_vec();
+        changed[1].head.ts_ms += 1;
+        assert_eq!(
+            verify_after(&author, tip, &changed),
+            Err(VerifyError::BadHash { seq: 4 })
+        );
     }
 
     #[test]
