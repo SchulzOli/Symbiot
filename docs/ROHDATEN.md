@@ -90,7 +90,8 @@ symbiot-import git ~/code/symbiot
 - **Ort:** `files/<zwei Zeichen>/<sha256>` neben der Datenbank. Jede Datei liegt nur einmal da, wie oft sie auch
   vorkommt. Beim Lesen wird sie gegen ihren Hash geprüft.
 - **Abgleich:** Nach den Ketten tauschen Gerät und Heimserver die Dateien aus, die ihre Rohdaten nennen, die
-  andere Seite aber noch nicht hat. Ketten gehen in Stücken zu 500 Einträgen. Der Heimserver nimmt nur Dateien
+  andere Seite aber noch nicht hat. Ketten gehen in beiden Richtungen in Stücken zu 500 Einträgen. Was ein
+  Abgleich kostet, hängt an dem, was neu ist, nicht an dem, was schon gespeichert ist (H3). Der Heimserver nimmt nur Dateien
   an, auf die Rohdaten verweisen, und prüft den Hash.
 - **Anzeigen:** Fotos (PNG, JPEG, GIF, WebP) zeigt die Zeitleiste direkt an, andere Dateien als Link zum
   Herunterladen. Der Server liefert alle anderen Typen nur als Download aus (`Content-Security-Policy: sandbox`),
@@ -158,7 +159,6 @@ Entscheidungen vorschlagen (E16), ausgeführt werden sie erst nach Bestätigung.
 - Import aus der App lädt keine Medien neben dem Export (Fotos eines WhatsApp-Exports); dafür weiter
   `symbiot-import` mit dem Ordner. Git braucht den Ordner des Repositorys und geht nur über `symbiot-import`.
 - Live-Adapter (M9).
-- Der Abgleich wird mit der Menge der Rohdaten langsamer (PLAN H3).
 - Der Import aus der App lädt in die Kette des Geräts, an dem man sitzt, nicht in eine eigene Adapter-Kette wie
   `symbiot-import` (Abweichung von E7 und E13, PLAN H6).
 - Dateien sind wie die Datenbank noch unverschlüsselt (E6, #22).

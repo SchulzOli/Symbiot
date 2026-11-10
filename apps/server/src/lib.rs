@@ -154,13 +154,17 @@ async fn import_file(
         chat: q.chat,
         utc_offset_min: q.utc_offset,
     };
-    let import = source
-        .read_bytes(&q.name, &body, &opts)
-        .map_err(|e| ApiError::bad(&e.to_string()))?;
-    let r = symbiot_import::load(&mut lock(&s), import).map_err(|e| match e {
-        symbiot_import::Error::Store(e) => ApiError::from(e),
-        e => ApiError::bad(&e.to_string()),
-    })?;
+    let name = q.name.clone();
+    let r = blocking(move || {
+        let import = source
+            .read_bytes(&name, &body, &opts)
+            .map_err(|e| ApiError::bad(&e.to_string()))?;
+        symbiot_import::load(&mut lock(&s), import).map_err(|e| match e {
+            symbiot_import::Error::Store(e) => ApiError::from(e),
+            e => ApiError::bad(&e.to_string()),
+        })
+    })
+    .await?;
     tracing::info!(
         source = q.source,
         added = r.added,
@@ -792,6 +796,21 @@ async fn sync_heads(
 #[derive(Deserialize)]
 pub struct After {
     pub after: Option<u64>,
+    /// At most this many entries (H3); everything after `after` when left out.
+    pub limit: Option<usize>,
+}
+
+/// Most entries in one answer, whatever the device asks for.
+const MAX_PAGE: usize = 2000;
+
+/// Store work that may take long (an import, a chain, a file) runs off the async threads, so
+/// `/health` and the interface keep answering meanwhile (H3).
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
+) -> Result<T, ApiError> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|_| ApiError(StatusCode::INTERNAL_SERVER_ERROR, "interner Fehler".into()))?
 }
 
 async fn sync_pull(
@@ -805,7 +824,8 @@ async fn sync_pull(
     let device = device_of(&headers, &method, &uri, b"")?;
     require_trusted(&s, &device)?;
     let author = PubKey::from_hex(&author).ok_or(ApiError::bad("ungültiger Geräteschlüssel"))?;
-    Ok(Json(lock(&s).chain_since(&author, a.after)?))
+    let limit = a.limit.map_or(usize::MAX, |l| l.clamp(1, MAX_PAGE));
+    blocking(move || Ok(Json(lock(&s).chain_page(&author, a.after, limit)?))).await
 }
 
 /// A device sends its chain. A new device introduces itself this way: its certificate is in
@@ -828,7 +848,7 @@ async fn sync_push(
     if entries.iter().any(|e| e.head.author != author) {
         return Err(ApiError::bad("Einträge gehören nicht zu dieser Kette"));
     }
-    let received = lock(&s).receive(entries)?;
+    let received = blocking(move || Ok(lock(&s).receive(entries)?)).await?;
     tracing::info!(%device, %author, received, "chain received");
     Ok(Json(symbiot_sync::Pushed { received }))
 }

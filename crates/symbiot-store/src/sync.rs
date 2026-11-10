@@ -5,11 +5,13 @@
 //! devices are only taken in if they verify, attach to what is already known, and belong to the
 //! same person as this device.
 
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
-use symbiot_core::{Hash, LedgerEntry, Person, PubKey, Trust, verify_chain};
+use symbiot_core::{Hash, LedgerEntry, Person, PubKey, Trust, kind, verify_after};
 
 use crate::{
-    Error, Result, Store, all_chains, chain_of, insert_entry, node_ids, rebuild_projection,
+    Error, Result, Store, decode_entry, device_entries, insert_entry, node_ids, raw_entry,
+    rebuild_projection,
 };
 
 /// Where a chain stands: its last entry.
@@ -61,7 +63,10 @@ fn person_from(words: &str) -> Result<Person> {
 impl Store {
     /// The person this device belongs to, if it was set up.
     pub fn person(&self) -> Result<Option<PubKey>> {
-        Ok(Trust::person_of(&chain_of(&self.conn, &self.device())?))
+        let me = self.device();
+        let mut own = device_entries(&self.conn)?;
+        own.retain(|e| e.head.author == me);
+        Ok(Trust::person_of(&own))
     }
 
     /// E5: confirms this device for the person behind `words`. Repeating it is harmless; a
@@ -117,8 +122,9 @@ impl Store {
         let Some(person) = self.person()? else {
             return Ok(None);
         };
-        let chains = all_chains(&self.conn)?;
-        Ok(Some(Trust::of(person, chains.iter().map(Vec::as_slice))))
+        // Only certificates and revocations: trust never reads what the devices wrote (H3).
+        let entries = device_entries(&self.conn)?;
+        Ok(Some(Trust::of(person, [entries.as_slice()])))
     }
 
     /// Whether `device` belongs to the same person as this one and is not revoked.
@@ -140,10 +146,15 @@ impl Store {
             .into_values()
             .map(|d| {
                 let tip = self.tip(&d.key)?;
-                let last_ms = match &tip {
-                    Some(_) => chain_of(&self.conn, &d.key)?.last().map(|e| e.head.ts_ms),
-                    None => None,
-                };
+                let last_ms: Option<i64> = self
+                    .conn
+                    .query_row(
+                        "SELECT ts_ms FROM chain_tip WHERE author = ?1",
+                        [d.key.0.as_slice()],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                let last_ms = last_ms.map(|t| t as u64);
                 Ok(DeviceInfo {
                     this_device: d.key == self.device(),
                     key: d.key,
@@ -158,11 +169,9 @@ impl Store {
 
     /// The last entry of every chain known here.
     pub fn heads(&self) -> Result<Vec<ChainHead>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT author, seq, hash FROM ledger AS l
-             WHERE seq = (SELECT MAX(seq) FROM ledger WHERE author = l.author)
-             ORDER BY author",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT author, seq, hash FROM chain_tip ORDER BY author")?;
         let rows = stmt.query_map([], |r| {
             Ok((
                 r.get::<_, Vec<u8>>(0)?,
@@ -183,18 +192,44 @@ impl Store {
     }
 
     pub fn tip(&self, author: &PubKey) -> Result<Option<ChainHead>> {
-        Ok(self.heads()?.into_iter().find(|h| h.author == *author))
+        Ok(read_tip(&self.conn, author)?.map(|(seq, hash)| ChainHead {
+            author: *author,
+            seq,
+            hash,
+        }))
     }
 
     /// The entries of `author`'s chain after `after` (all if `None`), ready to send. Content of
     /// nodes that are not exportable stays here (E3/E5); the receiver sees why from the policy.
     pub fn chain_since(&self, author: &PubKey, after: Option<u64>) -> Result<Vec<LedgerEntry>> {
+        self.chain_page(author, after, usize::MAX)
+    }
+
+    /// Like [`Store::chain_since`], but at most `limit` entries: a long chain is fetched in
+    /// pages, as it is sent in pages (H3).
+    pub fn chain_page(
+        &self,
+        author: &PubKey,
+        after: Option<u64>,
+        limit: usize,
+    ) -> Result<Vec<LedgerEntry>> {
         let home = node_ids(
             &self.conn,
             "SELECT node_id FROM policies WHERE exportable = 0",
         )?;
-        let mut chain = chain_of(&self.conn, author)?;
-        chain.retain(|e| after.is_none_or(|a| e.head.seq > a));
+        let mut stmt = self.conn.prepare(
+            "SELECT head, hash, sig, content FROM ledger
+             WHERE author = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(
+            params![
+                author.0.as_slice(),
+                after.map_or(-1, |a| a as i64),
+                i64::try_from(limit).unwrap_or(i64::MAX)
+            ],
+            raw_entry,
+        )?;
+        let mut chain: Vec<LedgerEntry> = rows.map(|r| decode_entry(r?)).collect::<Result<_>>()?;
         for e in &mut chain {
             // One rule for every kind of entry (H2): whatever speaks about a node that is not
             // exportable keeps its content here — its versions, proposals, suggestions.
@@ -209,6 +244,11 @@ impl Store {
     /// known, and come from a device of the same person; entries after a revocation are left
     /// out. A second, validly signed entry at a known position is a fork: kept as evidence
     /// and refused. Returns how many entries were new.
+    ///
+    /// H3: the cost depends on the new entries, not on what is stored. They are verified
+    /// against the tip of the chain (the rest was verified when it came in), trust reads only
+    /// certificates and revocations, and raw data never touches the graph: a batch goes
+    /// straight into its table, and only entries of the graph rebuild the projection.
     pub fn receive(&mut self, entries: Vec<LedgerEntry>) -> Result<usize> {
         let Some(first) = entries.first() else {
             return Ok(0);
@@ -225,20 +265,26 @@ impl Store {
         let me = self.device();
         let person = self.person()?.ok_or(Error::Untrusted)?;
         let tx = self.conn.transaction()?;
-        let known = chain_of(&tx, &author)?;
+        let tip = read_tip(&tx, &author)?;
+        let next = tip.map_or(0, |(seq, _)| seq + 1);
         let mut new: Vec<LedgerEntry> = Vec::new();
         for e in entries {
-            let seq = e.head.seq as usize;
-            if let Some(old) = known.get(seq) {
-                if old.hash == e.hash {
+            let seq = e.head.seq;
+            if seq < next {
+                if hash_at(&tx, &author, seq)? == Some(e.hash) {
                     continue;
                 }
-                let mut alternative = known[..seq].to_vec();
-                alternative.push(e.clone());
-                if verify_chain(&alternative).is_ok() {
+                // Another entry at a known position. If it is validly signed onto what comes
+                // before it, the device key wrote two histories.
+                let before = match seq {
+                    0 => None,
+                    _ => hash_at(&tx, &author, seq - 1)?.map(|h| (seq - 1, h)),
+                };
+                let attaches = seq == 0 || before.is_some();
+                if attaches && verify_after(&author, before, std::slice::from_ref(&e)).is_ok() {
                     tx.execute(
                         "INSERT OR IGNORE INTO forks (author, seq, hash, entry) VALUES (?1, ?2, ?3, ?4)",
-                        rusqlite::params![
+                        params![
                             author.0.as_slice(),
                             seq as i64,
                             e.hash.0.as_slice(),
@@ -246,17 +292,14 @@ impl Store {
                         ],
                     )?;
                     tx.commit()?;
-                    return Err(Error::Fork {
-                        author,
-                        seq: seq as u64,
-                    });
+                    return Err(Error::Fork { author, seq });
                 }
                 return Err(Error::BadChain(format!("Eintrag {seq} passt nicht")));
             }
-            if seq != known.len() + new.len() {
+            let expected = next + new.len() as u64;
+            if seq != expected {
                 return Err(Error::BadChain(format!(
-                    "Eintrag {} erwartet, {seq} bekommen",
-                    known.len() + new.len()
+                    "Eintrag {expected} erwartet, {seq} bekommen"
                 )));
             }
             new.push(e);
@@ -264,14 +307,14 @@ impl Store {
         if new.is_empty() {
             return Ok(0);
         }
-        let mut full = known;
-        full.extend(new.iter().cloned());
-        verify_chain(&full).map_err(|e| Error::BadChain(e.to_string()))?;
+        verify_after(&author, tip, &new).map_err(|e| Error::BadChain(e.to_string()))?;
 
-        let mut chains = all_chains(&tx)?;
-        chains.retain(|c| c[0].head.author != author);
-        chains.push(full);
-        let trust = Trust::of(person, chains.iter().map(Vec::as_slice));
+        // Who counts: the certificates and revocations known here, plus those that just came.
+        let is_device =
+            |e: &LedgerEntry| matches!(e.head.kind, kind::CERTIFY_DEVICE | kind::REVOKE_DEVICE);
+        let mut devices = device_entries(&tx)?;
+        devices.extend(new.iter().filter(|e| is_device(e)).cloned());
+        let trust = Trust::of(person, [devices.as_slice()]);
         let accepted: Vec<LedgerEntry> = new
             .into_iter()
             .take_while(|e| trust.accepts(&author, e.head.seq))
@@ -279,15 +322,58 @@ impl Store {
         if accepted.is_empty() {
             return Err(Error::Untrusted);
         }
+        let mut graph = false;
         for e in &accepted {
             insert_entry(&tx, e)?;
-            crate::evidence::receive_evidence(&tx, e)?;
+            if e.head.kind == kind::EVIDENCE_BATCH {
+                crate::evidence::receive_evidence(&tx, e)?;
+            } else {
+                graph = true;
+            }
         }
-        rebuild_projection(&tx, &me)?;
+        // Raw data of a source revoked meanwhile must not stay (E2).
+        let revoked = crate::sources::any_revoked(&tx)?;
+        if graph {
+            rebuild_projection(&tx, &me)?;
+        } else if revoked {
+            crate::sources::prune_revoked(&tx)?;
+        }
         tx.commit()?;
-        // Content removed by a deletion must not survive in the write-ahead log.
-        self.conn
-            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        if graph || revoked {
+            // Content removed by a deletion must not survive in the write-ahead log.
+            self.conn
+                .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        }
         Ok(accepted.len())
     }
+}
+
+/// Where `author`'s chain stands here: its last entry as `(seq, hash)`.
+fn read_tip(conn: &Connection, author: &PubKey) -> Result<Option<(u64, Hash)>> {
+    conn.query_row(
+        "SELECT seq, hash FROM chain_tip WHERE author = ?1",
+        [author.0.as_slice()],
+        |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Vec<u8>>(1)?)),
+    )
+    .optional()?
+    .map(|(seq, hash)| Ok((seq as u64, as_hash(hash)?)))
+    .transpose()
+}
+
+/// The hash of entry `seq` of `author`'s chain, if it is stored here.
+fn hash_at(conn: &Connection, author: &PubKey, seq: u64) -> Result<Option<Hash>> {
+    conn.query_row(
+        "SELECT hash FROM ledger WHERE author = ?1 AND seq = ?2",
+        params![author.0.as_slice(), seq as i64],
+        |r| r.get::<_, Vec<u8>>(0),
+    )
+    .optional()?
+    .map(as_hash)
+    .transpose()
+}
+
+fn as_hash(bytes: Vec<u8>) -> Result<Hash> {
+    Ok(Hash(bytes.try_into().map_err(|_| {
+        Error::Invalid("ungültiger Hash in der Datenbank")
+    })?))
 }
