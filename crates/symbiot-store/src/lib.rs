@@ -23,7 +23,8 @@ use symbiot_core::{
 /// 7: `evidence_file` lists the files raw data references (#28); rebuilt from the ledger.
 /// 8: `evidence_actor` (identifiers per item) and `identity_decision` (#31); rebuilt.
 /// 9: `evidence.scope`, `evidence.loaded_ms` and `source_grant` (#44); rebuilt.
-const SCHEMA_VERSION: i64 = 9;
+/// 10: `deleted` (tombstones) and `entry_about` (which entries speak about a node), H1; rebuilt.
+const SCHEMA_VERSION: i64 = 10;
 
 mod actions;
 mod evidence;
@@ -216,6 +217,15 @@ impl Store {
                  id   BLOB PRIMARY KEY,
                  rule BLOB NOT NULL
              );
+             CREATE TABLE IF NOT EXISTS deleted (
+                 node_id BLOB PRIMARY KEY,
+                 removed INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS entry_about (
+                 node_id BLOB NOT NULL,
+                 hash    BLOB NOT NULL,
+                 PRIMARY KEY (node_id, hash)
+             ) WITHOUT ROWID;
              CREATE TABLE IF NOT EXISTS forks (
                  author BLOB NOT NULL,
                  seq    INTEGER NOT NULL,
@@ -245,6 +255,23 @@ impl Store {
             set_aside: None,
             files: None,
         })
+    }
+
+    /// Hashes of this device's entries after `after` (all if `None`), oldest first.
+    pub(crate) fn own_hashes_after(&self, after: Option<u64>) -> Result<Vec<Hash>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT hash FROM ledger WHERE author = ?1 AND seq > ?2 ORDER BY seq")?;
+        let after = after.map_or(-1, |a| a as i64);
+        let rows = stmt.query_map(params![self.device().0.as_slice(), after], |r| {
+            r.get::<_, Vec<u8>>(0)
+        })?;
+        rows.map(|h| {
+            Ok(Hash(h?.try_into().map_err(|_| {
+                Error::Invalid("ungültiger Hash in der Datenbank")
+            })?))
+        })
+        .collect()
     }
 
     /// This device's identity.
@@ -465,6 +492,10 @@ struct Known {
     duplicate: bool,
     policy: Policy,
     rule: Option<Rule>,
+    /// Tombstones of the referenced nodes (E2).
+    deleted: HashMap<NodeId, bool>,
+    /// For a deletion: every entry that speaks about the node.
+    about: Vec<Hash>,
 }
 
 impl Lookup for Known {
@@ -486,6 +517,14 @@ impl Lookup for Known {
 
     fn rule(&self, id: &RuleId) -> Option<Rule> {
         self.rule.clone().filter(|r| r.id == *id)
+    }
+
+    fn deleted(&self, id: &NodeId) -> Option<bool> {
+        self.deleted.get(id).copied()
+    }
+
+    fn about(&self, _: &NodeId) -> Vec<Hash> {
+        self.about.clone()
     }
 }
 
@@ -531,12 +570,17 @@ fn append_in(tx: &Connection, signer: &Signer, op: Op) -> Result<Change> {
     for id in referenced {
         if let Some(n) = read_node(tx, &id)? {
             known.nodes.insert(id, n);
+        } else if let Some(removed) = read_deleted(tx, &id)? {
+            known.deleted.insert(id, removed);
         }
     }
     match &op {
         Op::Link { from, to, kind } => known.duplicate = edge_exists(tx, from, to, *kind)?,
         Op::Unlink { edge } => known.edge = read_edge(tx, edge)?,
-        Op::DeleteNode { node } => known.policy = read_policy(tx, node)?,
+        Op::DeleteNode { node } => {
+            known.policy = read_policy(tx, node)?;
+            known.about = read_about(tx, node)?;
+        }
         Op::RemoveSensitivityRule { rule } => {
             known.rule = read_rules(tx)?.into_iter().find(|r| r.id == *rule)
         }
@@ -545,7 +589,7 @@ fn append_in(tx: &Connection, signer: &Signer, op: Op) -> Result<Change> {
 
     let entry = signer.append(tip.as_ref(), next_ts(tx)?, op);
     let change = Change::of(&entry, &known).map_err(|e| match e {
-        ApplyError::UnknownNode(id) => Error::UnknownNode(id),
+        ApplyError::UnknownNode(id) | ApplyError::Gone(id) => Error::UnknownNode(id),
         ApplyError::UnknownEdge(id) => Error::UnknownEdge(id),
         ApplyError::SelfLink => {
             Error::Invalid("Ein Knoten kann nicht mit sich selbst verbunden werden")
@@ -567,9 +611,52 @@ fn append_in(tx: &Connection, signer: &Signer, op: Op) -> Result<Change> {
         }
     })?;
 
+    // E2: what speaks about a node whose content was removed is stored without content from
+    // the start (e.g. a suggestion rejected after its node was deleted).
+    let about = entry.about();
+    let mut entry = entry;
+    for node in &about {
+        if read_deleted(tx, node)? == Some(true) {
+            entry.content = None;
+        }
+    }
     insert_entry(tx, &entry)?;
+    write_about(tx, &about, &entry.hash)?;
     project(tx, &change)?;
     Ok(change)
+}
+
+/// Remembers that `entry` carries content about `nodes` (see `LedgerEntry::about`).
+fn write_about(tx: &Connection, nodes: &[NodeId], entry: &Hash) -> Result<()> {
+    for node in nodes {
+        tx.execute(
+            "INSERT OR IGNORE INTO entry_about (node_id, hash) VALUES (?1, ?2)",
+            params![node.0.as_slice(), entry.0.as_slice()],
+        )?;
+    }
+    Ok(())
+}
+
+fn read_about(conn: &Connection, node: &NodeId) -> Result<Vec<Hash>> {
+    let mut stmt = conn.prepare("SELECT hash FROM entry_about WHERE node_id = ?1")?;
+    let rows = stmt.query_map([node.0.as_slice()], |r| r.get::<_, Vec<u8>>(0))?;
+    rows.map(|h| {
+        Ok(Hash(h?.try_into().map_err(|_| {
+            Error::Invalid("ungültiger Hash in der Datenbank")
+        })?))
+    })
+    .collect()
+}
+
+/// Whether a node was deleted, and if so whether its content was removed.
+fn read_deleted(conn: &Connection, node: &NodeId) -> Result<Option<bool>> {
+    Ok(conn
+        .query_row(
+            "SELECT removed FROM deleted WHERE node_id = ?1",
+            [node.0.as_slice()],
+            |r| r.get(0),
+        )
+        .optional()?)
 }
 
 fn insert_entry(tx: &Connection, entry: &LedgerEntry) -> Result<()> {
@@ -660,8 +747,18 @@ fn project(tx: &Connection, change: &Change) -> Result<()> {
             tx.execute("DELETE FROM nodes WHERE id = ?1", [id])?;
             tx.execute("DELETE FROM edges WHERE from_id = ?1 OR to_id = ?1", [id])?;
             tx.execute("DELETE FROM sensitive WHERE node_id = ?1", [id])?;
-            tx.execute("DELETE FROM policies WHERE node_id = ?1", [id])?;
             tx.execute("DELETE FROM by_hand WHERE node_id = ?1", [id])?;
+            tx.execute("DELETE FROM entry_about WHERE node_id = ?1", [id])?;
+            // The tombstone stays for good: entries about the node may still arrive.
+            let removed = !prune.is_empty();
+            tx.execute(
+                "INSERT OR REPLACE INTO deleted (node_id, removed) VALUES (?1, ?2)",
+                params![id, removed],
+            )?;
+            // Content that stays in the chain keeps its policy (E3).
+            if removed {
+                tx.execute("DELETE FROM policies WHERE node_id = ?1", [id])?;
+            }
             // E2: the head stays (hash, signature), title and body go — with secure_delete.
             for h in prune {
                 tx.execute(
@@ -805,8 +902,19 @@ fn rebuild_projection(tx: &Connection, me: &PubKey) -> Result<()> {
     tx.execute_batch(
         "DELETE FROM nodes; DELETE FROM edges; DELETE FROM sensitive; DELETE FROM policies;
          DELETE FROM by_hand; DELETE FROM rules; DELETE FROM identity_decision;
-         DELETE FROM source_grant;",
+         DELETE FROM source_grant; DELETE FROM deleted; DELETE FROM entry_about;",
     )?;
+    for (id, removed) in &r.state.deleted {
+        tx.execute(
+            "INSERT INTO deleted (node_id, removed) VALUES (?1, ?2)",
+            params![id.0.as_slice(), removed],
+        )?;
+    }
+    for (id, entries) in &r.state.about {
+        for h in entries {
+            write_about(tx, std::slice::from_ref(id), h)?;
+        }
+    }
     sources::project_all(tx, &r.state.sources)?;
     for (entry, decision) in &r.state.identity {
         persons::project_identity(

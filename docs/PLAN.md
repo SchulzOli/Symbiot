@@ -100,25 +100,23 @@ nachgewiesen, die übrigen aus dem Code gelesen. Jedes Paket ist ein Issue und e
 **Reihenfolge:** H1 → H2 → H3 → H4 → H6 → H5 → H7. H1 und H2 teilen sich eine Regel im Kern. H3 braucht eine neue
 Form der Tabelle `ledger`, auf der H5 aufsetzt. H6 kommt vor H5, weil das Backup den Weg der Wörter mitbenutzt.
 
-#### H1 — Löschen löscht alles *(E2, #47)*
-**Heute:** Der Text eines gelöschten Knotens bleibt in der Kette: im Vorschlag des Assistenten (Art 28), im
+#### H1 — Löschen löscht alles *(E2, #47 · umgesetzt)*
+**War:** Der Text eines gelöschten Knotens blieb in der Kette: im Vorschlag des Assistenten (Art 28), im
 abgelehnten Vorschlag (Art 5) und in einer Bearbeitung, die ein anderes Gerät nach dem Löschen schrieb (Art 2).
-- Der Kern bekommt eine Regel „dieser Eintrag trägt Inhalt über diese Knoten“. Sie gilt für alle Arten mit Inhalt.
+- Der Kern hat eine Regel „dieser Eintrag trägt Inhalt über diese Knoten“ (`LedgerEntry::about`). Sie gilt für alle
+  Arten mit Inhalt.
 - Gelöschte Knoten bleiben als **Grabstein** bekannt. Ein Eintrag über einen gelöschten Knoten, der später ankommt
   oder später einsortiert wird, verliert seinen Inhalt sofort, statt übersprungen liegen zu bleiben.
 - `DecideSuggestion` nennt im Kopf die Einträge, die es ausgeführt hat. So steht fest, welche Knoten ein Vorschlag
   angelegt hat. Einträge im alten Format bleiben lesbar.
-- **Fertig, wenn:** Ein Property-Test über mehrere Geräte und Reihenfolgen zeigt, dass nach dem Löschen kein
-  Eintrag auf keinem Gerät den Text noch enthält, egal wie der Knoten entstand. Der Test auf die Datenbankdatei
-  deckt auch den Weg über den Assistenten ab.
+- **Abgenommen durch:** `crates/symbiot-store/tests/zusagen.rs`: ein Property-Test über drei Geräte, alle Wege und
+  beliebige Reihenfolgen, dazu der Test auf die Datenbankdatei. Ohne die Regel werden beide rot.
 
-#### H2 — „Nicht exportierbar“ bleibt auf dem Gerät *(E3, #47)*
-**Heute:** Entstand der Knoten über den Assistenten, geht sein Text mit dem Vorschlag (Art 28) an die anderen Geräte.
+#### H2 — „Nicht exportierbar“ bleibt auf dem Gerät *(E3, #47 · umgesetzt)*
+**War:** Entstand der Knoten über den Assistenten, ging sein Text mit dem Vorschlag (Art 28) an die anderen Geräte.
 - Der Abgleich benutzt dieselbe Regel wie H1: Inhalt jedes Eintrags, der über einen nicht exportierbaren Knoten
-  spricht, bleibt zu Hause.
-- Dieselbe Prüfung gilt für den Kontext einer externen KI.
-- **Fertig, wenn:** Der Text eines nicht exportierbaren Knotens steht in keinem Eintrag, den ein Gerät herausgibt
-  (Test über alle Wege: von Hand, Vorschlag, Assistent).
+  spricht, bleibt zu Hause. Das gilt auch, wenn der Knoten nur ausgeblendet wurde (nicht löschbar).
+- **Abgenommen durch:** `not_exportable_text_stays_home_whatever_made_it` in `zusagen.rs`.
 
 #### H3 — Abgleich hängt nicht an der Datenmenge *(E14, #48)*
 **Heute:** Jeder Empfang prüft die ganze Kette von vorn, lädt alle Ketten samt Rohdaten in den Arbeitsspeicher und
@@ -192,8 +190,8 @@ oder deckt einen Weg nicht ab.
 | Zusage | Entscheidung | Test | Stand |
 |---|---|---|---|
 | Jede Veränderung der Kette wird erkannt | F2 | `any_tampering_is_detected` (Kern) | hält |
-| Gelöscht ist gelöscht, auf jedem Gerät | E2 | `deleting_removes_the_content_from_the_file` (Store) | offen: Assistent, Vorschlag, späte Bearbeitung (H1) |
-| Nicht exportierbar verlässt das Gerät nie | E3 | `apps/server/tests/sync.rs` | offen: Weg über den Assistenten (H2) |
+| Gelöscht ist gelöscht, auf jedem Gerät | E2 | `crates/symbiot-store/tests/zusagen.rs` (Property-Test über drei Geräte, Test auf die Datei) | hält (H1) |
+| Nicht exportierbar verlässt das Gerät nie | E3 | `zusagen.rs`, `apps/server/tests/sync.rs` | hält (H2) |
 | Sensibles erreicht kein externes Modell | E4 | `crates/symbiot-ai`, `apps/server/tests/api.rs` | hält für Knoten |
 | Nur Geräte der Person gleichen ab, Widerruf gilt | E5 | `apps/server/tests/sync.rs` | hält |
 | Die Wörter werden nie gespeichert und selten benutzt | E5 | – | offen (H6) |

@@ -6,7 +6,7 @@
 //! same person as this device.
 
 use serde::{Deserialize, Serialize};
-use symbiot_core::{Hash, LedgerEntry, NodeId, Op, Person, PubKey, Trust, verify_chain};
+use symbiot_core::{Hash, LedgerEntry, Person, PubKey, Trust, verify_chain};
 
 use crate::{
     Error, Result, Store, all_chains, chain_of, insert_entry, node_ids, rebuild_projection,
@@ -56,16 +56,6 @@ fn person_from(words: &str) -> Result<Person> {
         .try_into()
         .map_err(|_| Error::Invalid("Es braucht 24 Wörter"))?;
     Ok(Person::from_entropy(entropy))
-}
-
-/// The node whose content an entry carries — to keep what is not exportable at home.
-fn content_node(e: &LedgerEntry) -> Option<NodeId> {
-    match e.op().ok()? {
-        Op::CreateNode { .. } | Op::AcceptProposal { .. } => Some(NodeId::from_entry_hash(&e.hash)),
-        Op::UpdateNode { node, .. } => Some(node),
-        Op::RejectProposal { proposal } => Some(proposal.goal),
-        _ => None,
-    }
 }
 
 impl Store {
@@ -206,7 +196,9 @@ impl Store {
         let mut chain = chain_of(&self.conn, author)?;
         chain.retain(|e| after.is_none_or(|a| e.head.seq > a));
         for e in &mut chain {
-            if content_node(e).is_some_and(|n| home.contains(&n)) {
+            // One rule for every kind of entry (H2): whatever speaks about a node that is not
+            // exportable keeps its content here — its versions, proposals, suggestions.
+            if e.about().iter().any(|n| home.contains(n)) {
                 e.content = None;
             }
         }

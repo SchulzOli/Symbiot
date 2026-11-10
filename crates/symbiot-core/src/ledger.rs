@@ -129,6 +129,10 @@ pub enum Op {
         accepted: bool,
         chosen: Vec<u32>,
         suggestion: Suggestion,
+        /// H1: the entries the chosen actions wrote, in order. They say which nodes the
+        /// suggestion created, so its text can be removed with them (E2) and kept at home
+        /// with them (E3). Empty for a rejected suggestion and in entries written before H1.
+        executed: Vec<Hash>,
     },
     /// #44: how the raw data of a source is used. The source name is in the head; what is
     /// left out names chats or repositories, so it is content (removable).
@@ -231,11 +235,17 @@ impl Op {
                 accepted,
                 chosen,
                 suggestion,
-            } => (
-                kind::DECIDE_SUGGESTION,
-                enc(&(accepted, chosen, &suggestion.model)),
-                Some(enc(suggestion)),
-            ),
+                executed,
+            } => {
+                // Without executed entries the params stay as before H1, so old hashes keep
+                // their meaning.
+                let params = if executed.is_empty() {
+                    enc(&(accepted, chosen, &suggestion.model))
+                } else {
+                    enc(&(accepted, chosen, &suggestion.model, executed))
+                };
+                (kind::DECIDE_SUGGESTION, params, Some(enc(suggestion)))
+            }
             Op::GrantSource { source, grant } => (kind::GRANT, enc(source), Some(enc(grant))),
             Op::RevokeSource { source } => (kind::REVOKE, enc(source), None),
             Op::DecideIdentity { decision } => {
@@ -459,12 +469,13 @@ impl LedgerEntry {
                 Op::RecordEvidence { items }
             }
             kind::DECIDE_SUGGESTION => {
-                let (accepted, chosen, _model): (bool, Vec<u32>, String) = dec(p)?;
+                let (accepted, chosen, executed) = self.decision()?;
                 match self.content.as_deref() {
                     Some([part]) => Op::DecideSuggestion {
                         accepted,
                         chosen,
                         suggestion: dec(&part.data.0)?,
+                        executed,
                     },
                     _ => return Err(Decode::Malformed),
                 }
@@ -486,6 +497,68 @@ impl LedgerEntry {
             },
             other => return Err(Decode::Unknown(other)),
         })
+    }
+
+    /// The head of a decision on a suggestion: accepted, chosen actions, executed entries.
+    /// Readable even when the suggestion itself (the content) was removed.
+    fn decision(&self) -> Result<(bool, Vec<u32>, Vec<Hash>), Decode> {
+        let p = &self.head.params.0[..];
+        type New = (bool, Vec<u32>, String, Vec<Hash>);
+        match dec::<New>(p) {
+            Ok((accepted, chosen, _model, executed)) => Ok((accepted, chosen, executed)),
+            Err(_) => {
+                let (accepted, chosen, _model): (bool, Vec<u32>, String) = dec(p)?;
+                Ok((accepted, chosen, Vec::new()))
+            }
+        }
+    }
+
+    /// The nodes this entry carries content about: their title, text, or a suggestion that
+    /// names them. One rule for two promises — when such a node is deleted the content of
+    /// this entry goes too (E2), and while such a node is not exportable the content stays
+    /// on this device (E3). Empty for entries without content and for raw data.
+    pub fn about(&self) -> Vec<NodeId> {
+        if self.head.content.is_none() {
+            return Vec::new();
+        }
+        let p = &self.head.params.0[..];
+        let mut nodes: Vec<NodeId> = Vec::new();
+        match self.head.kind {
+            kind::CREATE_NODE | kind::ACCEPT_PROPOSAL => {
+                nodes.push(NodeId::from_entry_hash(&self.hash));
+            }
+            kind::UPDATE_NODE => {
+                if let Ok(Op::UpdateNode { node, .. }) = self.op() {
+                    nodes.push(node);
+                }
+            }
+            kind::REJECT_PROPOSAL => {
+                type Params = (NodeId, Vec<NodeId>, NodeKind, String);
+                if let Ok((goal, ..)) = dec::<Params>(p) {
+                    nodes.push(goal);
+                }
+            }
+            kind::DECIDE_SUGGESTION => {
+                // The nodes the executed actions created are known from the head alone.
+                if let Ok((_, _, executed)) = self.decision() {
+                    nodes.extend(executed.iter().map(NodeId::from_entry_hash));
+                }
+                if let Ok(Op::DecideSuggestion { suggestion, .. }) = self.op() {
+                    nodes.extend(suggestion.sources.iter().copied());
+                    for a in &suggestion.actions {
+                        for t in a.targets() {
+                            if let crate::action::Target::Node(id) = t {
+                                nodes.push(id);
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        nodes.sort();
+        nodes.dedup();
+        nodes
     }
 
     fn text(&self) -> Result<(String, String), Decode> {

@@ -35,10 +35,11 @@ bleibt), und `verify()` bestätigt die Kette trotzdem. Geräte, die eine Kopie h
 auf. Ein fremdes Gerät kann dazu nicht gezwungen werden – das gilt für jede Löschung in einem verteilten
 System und muss in der Oberfläche ehrlich so stehen.
 
-**Bekannte Lücken (2026-11-10, PLAN H1):** Weggeräumt wird heute nur, was im Verlauf des Knotens steht. Sein Text
-bleibt in der Kette, wenn er auch in einem Vorschlag des Assistenten (`DecideSuggestion`) oder einem abgelehnten
-Vorschlag (`RejectProposal`) steht, und wenn ein anderes Gerät den Knoten nach dem Löschen noch bearbeitet hat
-(der Eintrag wird übersprungen, sein Inhalt bleibt).
+**Vollständig seit H1 (2026-11-10):** Weggeräumt wird der Inhalt jedes Eintrags, der über den Knoten spricht: seine
+Fassungen, Vorschläge des Assistenten (`DecideSuggestion`), abgelehnte Vorschläge (`RejectProposal`). Der Kern
+bestimmt das für jede Eintragsart mit einer Regel (`LedgerEntry::about`). Ein gelöschter Knoten bleibt als
+Grabstein bekannt: Schreibt ein anderes Gerät später noch etwas über ihn, verliert auch dieser Eintrag seinen
+Inhalt, auf jedem Gerät. `DecideSuggestion` nennt dafür im Kopf die Einträge, die es ausgeführt hat.
 
 ## E3 — „Löschbar“ und „exportierbar“ entscheidet der Mensch, pro Knoten · *entschieden, umgesetzt*
 
@@ -69,8 +70,8 @@ damit: nicht löschbar, solange der Mensch es nicht ändert.
 | eigene Geräte | sensible Knoten (E4), alle Rohdaten (E14) | Abgleich zwischen den eigenen Geräten ja, externe KI und andere Menschen nein. |
 | darf hinaus | alles andere | Darf an eine gehostete KI hinter dem Masken-Filter gehen. |
 
-**Bekannte Lücke (2026-11-10, PLAN H2):** Entsteht ein nicht exportierbarer Knoten über den Assistenten, geht sein
-Text im Inhalt des `DecideSuggestion`-Eintrags an die anderen Geräte.
+**Seit H2 (2026-11-10)** gilt „nur dieses Gerät“ für jeden Eintrag, der über den Knoten spricht, auch für
+Vorschläge des Assistenten, und auch dann noch, wenn ein nicht löschbarer Knoten ausgeblendet wurde.
 
 ## E4 — Was ist sensibel? · *entschieden, umgesetzt*
 
@@ -481,7 +482,7 @@ Entschieden:
   Nachrichten. M9 beginnt mit einer Messung, ob SQLite für die Auswertungen reicht.
 - **M6 (Sensor) rückt ans Ende.** Er beantwortet keine der Fragen aus E14; die `no_std`-Garantie hält die CI.
 
-Nachgewiesen mit Experimenten: Text gelöschter Knoten in Einträgen der Arten 28, 5 und 2; Text eines nicht
+Nachgewiesen mit Experimenten (die ersten beiden sind seit H1 und H2 behoben): Text gelöschter Knoten in Einträgen der Arten 28, 5 und 2; Text eines nicht
 exportierbaren Knotens im Abgleich (Art 28); Kosten eines Empfangs wachsen linear mit den gespeicherten Rohdaten
 (0,2 s bei 50 000 Nachrichten, 0,5 s bei 200 000, für einen einzigen neuen Eintrag). Aus dem Code gelesen:
 `POST /api/import` ohne Prüfung der Herkunft; Backup und Wiederherstellung des Heimservers.
