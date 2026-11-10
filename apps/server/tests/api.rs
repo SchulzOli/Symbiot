@@ -85,7 +85,11 @@ fn app_with_ai() -> (Router, Arc<FakeAi>) {
 }
 
 async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
-    let req = Request::builder().method(method).uri(uri);
+    // H4: like the interface, every call says that it comes from the interface.
+    let req = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(symbiot_server::SAME_ORIGIN_HEADER, "1");
     let req = match body {
         Some(b) => req
             .header("content-type", "application/json")
@@ -818,4 +822,98 @@ async fn assist_suggests_and_the_human_decides() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+/// H4: a request that changes something must come from the interface. A page of another
+/// origin, open in a browser inside the tailnet, cannot write — not even an import, which
+/// takes any body.
+#[tokio::test]
+async fn writes_from_outside_the_interface_are_refused() {
+    let app = app();
+    let send =
+        |method: &'static str, uri: &'static str, headers: Vec<(&'static str, &'static str)>| {
+            let app = app.clone();
+            async move {
+                let mut req = Request::builder().method(method).uri(uri);
+                for (k, v) in headers {
+                    req = req.header(k, v);
+                }
+                let body = r#"{"kind":"goal","title":"von außen"}"#;
+                let res = app
+                    .oneshot(req.body(Body::from(body)).unwrap())
+                    .await
+                    .unwrap();
+                res.status()
+            }
+        };
+    let json = ("content-type", "application/json");
+    let own = (symbiot_server::SAME_ORIGIN_HEADER, "1");
+
+    // No header: what a form or a simple fetch from another page can send.
+    assert_eq!(
+        send("POST", "/api/nodes", vec![json]).await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        send(
+            "POST",
+            "/api/import?source=whatsapp&name=x.txt",
+            vec![("content-type", "text/plain")]
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        send("DELETE", "/api/nodes/00", vec![]).await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        send("POST", "/api/person/words", vec![]).await,
+        StatusCode::FORBIDDEN
+    );
+    // The header, but the browser says the request comes from another site.
+    assert_eq!(
+        send(
+            "POST",
+            "/api/nodes",
+            vec![json, own, ("sec-fetch-site", "cross-site")]
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        send(
+            "POST",
+            "/api/nodes",
+            vec![json, own, ("sec-fetch-site", "same-site")]
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+    // Nothing was written.
+    let (_, nodes) = call(&app, "GET", "/api/nodes", None).await;
+    assert_eq!(nodes.as_array().unwrap().len(), 0);
+
+    // The interface itself, with and without what a browser adds.
+    assert_eq!(
+        send("POST", "/api/nodes", vec![json, own]).await,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        send(
+            "POST",
+            "/api/nodes",
+            vec![json, own, ("sec-fetch-site", "same-origin")]
+        )
+        .await,
+        StatusCode::CREATED
+    );
+    // Reading needs nothing, and answers may not be embedded elsewhere.
+    let res = app
+        .clone()
+        .oneshot(Request::get("/api/nodes").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers()["cross-origin-resource-policy"], "same-origin");
 }

@@ -31,6 +31,15 @@ Einträge seiner Kette, und was er danach schreibt, passt nicht mehr dazu: Die G
 dauerhaft ab. Einen Weg zurück gibt es in der App noch nicht. Daten und Dateien liegen bis H5 unverschlüsselt im
 Datenordner.
 
+## Wer schreiben darf (H4)
+
+Die Web-Oberfläche hat keine Anmeldung; das Tailnet ist die Grenze. Schreibende Anfragen an `/api` nimmt der
+Server nur von seiner eigenen Oberfläche an (Header `x-symbiot`), der Abgleich der Geräte ist mit dem
+Geräteschlüssel signiert. Wer die API von Hand benutzt, schickt den Header mit:
+```bash
+curl -s -H 'x-symbiot: 1' -H 'content-type: application/json' -d '{"kind":"goal","title":"Test"}' http://127.0.0.1:8100/api/nodes
+```
+
 ## KI (M3)
 
 Der Server fragt LiteLLM nur, wenn `SYMBIOT_AI_URL` gesetzt ist. Ohne KI läuft alles andere weiter, nur

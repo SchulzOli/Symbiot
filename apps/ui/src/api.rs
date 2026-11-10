@@ -52,7 +52,7 @@ pub async fn create_node(
     if tauri_invoke_fn().is_some() {
         return invoke("create_node", &args).await;
     }
-    http_json(gloo_net::http::Request::post("/api/nodes").json(&args)).await
+    http_json(write::post("/api/nodes").json(&args)).await
 }
 
 pub async fn update_node(id: NodeId, title: String, body: String) -> ApiResult<Node> {
@@ -67,7 +67,7 @@ pub async fn update_node(id: NodeId, title: String, body: String) -> ApiResult<N
         return invoke("update_node", &args).await;
     }
     let url = format!("/api/nodes/{id}");
-    http_json(gloo_net::http::Request::put(&url).json(&args)).await
+    http_json(write::put(&url).json(&args)).await
 }
 
 /// E2: deletes a node. Returns how many entries lost their content (0 if not deletable).
@@ -84,7 +84,7 @@ pub async fn delete_node(id: NodeId) -> ApiResult<usize> {
         pruned: usize,
     }
     let url = format!("/api/nodes/{id}");
-    let d: Deleted = http_json(gloo_net::http::Request::delete(&url).build()).await?;
+    let d: Deleted = http_json(write::delete(&url).build()).await?;
     Ok(d.pruned)
 }
 
@@ -117,7 +117,7 @@ pub async fn set_policy(id: NodeId, policy: Policy) -> ApiResult<()> {
         return invoke("set_policy", &args).await;
     }
     let url = format!("/api/nodes/{id}/policy");
-    http_empty(gloo_net::http::Request::put(&url).json(&policy)).await
+    http_empty(write::put(&url).json(&policy)).await
 }
 
 pub async fn unlink(id: EdgeId) -> ApiResult<()> {
@@ -129,7 +129,7 @@ pub async fn unlink(id: EdgeId) -> ApiResult<()> {
         return invoke("unlink_edge", &Args { id }).await;
     }
     let url = format!("/api/edges/{id}");
-    http_empty(gloo_net::http::Request::delete(&url).build()).await
+    http_empty(write::delete(&url).build()).await
 }
 
 pub async fn node_history(id: NodeId) -> ApiResult<Vec<LedgerEntry>> {
@@ -164,7 +164,7 @@ pub async fn link(from: NodeId, to: NodeId, kind: EdgeKind) -> ApiResult<Edge> {
     if tauri_invoke_fn().is_some() {
         return invoke("link_nodes", &args).await;
     }
-    http_json(gloo_net::http::Request::post("/api/edges").json(&args)).await
+    http_json(write::post("/api/edges").json(&args)).await
 }
 
 pub async fn verify() -> ApiResult<VerifyReport> {
@@ -226,7 +226,7 @@ pub async fn new_words() -> ApiResult<String> {
     let w: Words = if tauri_invoke_fn().is_some() {
         invoke("new_words", &NoArgs {}).await?
     } else {
-        http_json(gloo_net::http::Request::post("/api/person/words").build()).await?
+        http_json(write::post("/api/person/words").build()).await?
     };
     Ok(w.words)
 }
@@ -241,7 +241,7 @@ pub async fn certify(words: String, name: String) -> ApiResult<PersonInfo> {
     if tauri_invoke_fn().is_some() {
         return invoke("certify", &args).await;
     }
-    http_json(gloo_net::http::Request::post("/api/person/certify").json(&args)).await
+    http_json(write::post("/api/person/certify").json(&args)).await
 }
 
 pub async fn revoke(words: String, device: PubKey) -> ApiResult<PersonInfo> {
@@ -254,7 +254,7 @@ pub async fn revoke(words: String, device: PubKey) -> ApiResult<PersonInfo> {
     if tauri_invoke_fn().is_some() {
         return invoke("revoke", &args).await;
     }
-    http_json(gloo_net::http::Request::post("/api/person/revoke").json(&args)).await
+    http_json(write::post("/api/person/revoke").json(&args)).await
 }
 
 /// Mirrors `symbiot_sync::Report`.
@@ -414,7 +414,7 @@ pub async fn assist(
     if tauri_invoke_fn().is_some() {
         return invoke("assist", &args).await;
     }
-    http_json(gloo_net::http::Request::post("/api/assist").json(&args)).await
+    http_json(write::post("/api/assist").json(&args)).await
 }
 
 /// E16: the human decides; `chosen` are the indexes of the actions to carry out.
@@ -437,7 +437,7 @@ pub async fn decide_suggestion(
     if tauri_invoke_fn().is_some() {
         return invoke("decide_suggestion", &args).await;
     }
-    http_json(gloo_net::http::Request::post("/api/suggestions/decide").json(&args)).await
+    http_json(write::post("/api/suggestions/decide").json(&args)).await
 }
 
 /// #31: one identifier of a person.
@@ -495,7 +495,7 @@ pub async fn merge_identities(ids: Vec<String>, name: String) -> ApiResult<()> {
     if tauri_invoke_fn().is_some() {
         return invoke("merge_identities", &args).await;
     }
-    http_empty(gloo_net::http::Request::post("/api/persons/merge").json(&args)).await
+    http_empty(write::post("/api/persons/merge").json(&args)).await
 }
 
 pub async fn split_identity(id: String) -> ApiResult<()> {
@@ -507,7 +507,7 @@ pub async fn split_identity(id: String) -> ApiResult<()> {
     if tauri_invoke_fn().is_some() {
         return invoke("split_identity", &args).await;
     }
-    http_empty(gloo_net::http::Request::post("/api/persons/split").json(&args)).await
+    http_empty(write::post("/api/persons/split").json(&args)).await
 }
 
 pub async fn keep_apart(a: String, b: String) -> ApiResult<()> {
@@ -520,7 +520,7 @@ pub async fn keep_apart(a: String, b: String) -> ApiResult<()> {
     if tauri_invoke_fn().is_some() {
         return invoke("keep_apart", &args).await;
     }
-    http_empty(gloo_net::http::Request::post("/api/persons/apart").json(&args)).await
+    http_empty(write::post("/api/persons/apart").json(&args)).await
 }
 
 /// #44: a source as the person manages it (see `symbiot_store::SourceInfo`).
@@ -565,7 +565,7 @@ pub async fn grant_source(source: String, grant: Grant) -> ApiResult<()> {
     if tauri_invoke_fn().is_some() {
         return invoke("grant_source", &args).await;
     }
-    http_empty(gloo_net::http::Request::post("/api/sources/grant").json(&args)).await
+    http_empty(write::post("/api/sources/grant").json(&args)).await
 }
 
 /// What an import did (see `symbiot_store::Recorded`).
@@ -614,7 +614,7 @@ pub async fn import_file(
         enc(chat)
     );
     http_json(
-        gloo_net::http::Request::post(&url)
+        write::post(&url)
             .header("content-type", "application/octet-stream")
             .body(JsValue::from(bytes)),
     )
@@ -635,8 +635,7 @@ pub async fn revoke_source(source: String) -> ApiResult<usize> {
     struct Revoked {
         removed: usize,
     }
-    let r: Revoked =
-        http_json(gloo_net::http::Request::post("/api/sources/revoke").json(&args)).await?;
+    let r: Revoked = http_json(write::post("/api/sources/revoke").json(&args)).await?;
     Ok(r.removed)
 }
 
@@ -702,7 +701,7 @@ pub async fn add_rule(
     if tauri_invoke_fn().is_some() {
         return invoke("add_rule", &args).await;
     }
-    http_json(gloo_net::http::Request::post("/api/rules").json(&args)).await
+    http_json(write::post("/api/rules").json(&args)).await
 }
 
 pub async fn remove_rule(id: RuleId) -> ApiResult<()> {
@@ -714,7 +713,7 @@ pub async fn remove_rule(id: RuleId) -> ApiResult<()> {
         return invoke("remove_rule", &Args { id }).await;
     }
     let url = format!("/api/rules/{id}");
-    http_empty(gloo_net::http::Request::delete(&url).build()).await
+    http_empty(write::delete(&url).build()).await
 }
 
 /// E4: the local model suggests rules. Writes nothing.
@@ -724,7 +723,7 @@ pub async fn suggest_rules() -> ApiResult<Vec<RuleProposal>> {
     if tauri_invoke_fn().is_some() {
         return invoke("suggest_rules", &NoArgs {}).await;
     }
-    http_json(gloo_net::http::Request::post("/api/rules/suggest").build()).await
+    http_json(write::post("/api/rules/suggest").build()).await
 }
 
 pub async fn node_sensitivity(id: NodeId) -> ApiResult<Sensitivity> {
@@ -777,7 +776,7 @@ pub async fn propose(goal: NodeId, remote: bool) -> ApiResult<Proposal> {
         remote: bool,
     }
     let url = format!("/api/nodes/{goal}/propose");
-    http_json(gloo_net::http::Request::post(&url).json(&Body { remote })).await
+    http_json(write::post(&url).json(&Body { remote })).await
 }
 
 pub async fn accept_proposal(proposal: Proposal) -> ApiResult<Accepted> {
@@ -788,7 +787,7 @@ pub async fn accept_proposal(proposal: Proposal) -> ApiResult<Accepted> {
     if tauri_invoke_fn().is_some() {
         return invoke("accept_proposal", &Args { proposal }).await;
     }
-    http_json(gloo_net::http::Request::post("/api/proposals/accept").json(&proposal)).await
+    http_json(write::post("/api/proposals/accept").json(&proposal)).await
 }
 
 pub async fn reject_proposal(proposal: Proposal) -> ApiResult<()> {
@@ -799,7 +798,7 @@ pub async fn reject_proposal(proposal: Proposal) -> ApiResult<()> {
     if tauri_invoke_fn().is_some() {
         return invoke("reject_proposal", &Args { proposal }).await;
     }
-    http_empty(gloo_net::http::Request::post("/api/proposals/reject").json(&proposal)).await
+    http_empty(write::post("/api/proposals/reject").json(&proposal)).await
 }
 
 pub async fn list_sensitive() -> ApiResult<Vec<NodeId>> {
@@ -825,7 +824,7 @@ pub async fn set_sensitive(id: NodeId, sensitive: bool) -> ApiResult<()> {
         sensitive: bool,
     }
     let url = format!("/api/nodes/{id}/sensitive");
-    http_empty(gloo_net::http::Request::put(&url).json(&Body { sensitive })).await
+    http_empty(write::put(&url).json(&Body { sensitive })).await
 }
 
 /// Where the data lives — shown in the footer so it is always clear.
@@ -867,6 +866,26 @@ fn js_error(v: JsValue) -> String {
 }
 
 /// For calls that answer „204 No Content“.
+/// H4: requests that change something carry a header only this interface sends. The server
+/// refuses writes without it, so a page of another origin cannot write through the browser.
+mod write {
+    use gloo_net::http::{Request, RequestBuilder};
+
+    const SAME_ORIGIN_HEADER: &str = "x-symbiot";
+
+    pub fn post(url: &str) -> RequestBuilder {
+        Request::post(url).header(SAME_ORIGIN_HEADER, "1")
+    }
+
+    pub fn put(url: &str) -> RequestBuilder {
+        Request::put(url).header(SAME_ORIGIN_HEADER, "1")
+    }
+
+    pub fn delete(url: &str) -> RequestBuilder {
+        Request::delete(url).header(SAME_ORIGIN_HEADER, "1")
+    }
+}
+
 async fn http_empty(req: Result<gloo_net::http::Request, gloo_net::Error>) -> ApiResult<()> {
     let res = req
         .map_err(|e| e.to_string())?
