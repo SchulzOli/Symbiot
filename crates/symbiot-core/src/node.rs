@@ -290,21 +290,27 @@ impl Change {
                 }))
             }
             Op::AcceptProposal { proposal: p } => {
-                check_proposal(p, view)?;
+                let goal_there = check_proposal(p, view, e.is_pruned(), true)?;
                 let id = NodeId::from_entry_hash(&e.hash);
+                let node = Node {
+                    id,
+                    kind: p.kind,
+                    title: p.title.clone(),
+                    body: p.body.clone(),
+                    author,
+                    version: 1,
+                    created_ms: ts_ms,
+                    updated_ms: ts_ms,
+                    history: alloc::vec![e.hash],
+                    concurrent: false,
+                };
+                if !goal_there {
+                    // The goal was deleted on another device meanwhile. The step the human
+                    // accepted stays — without the connection, as when a node is deleted.
+                    return Ok(Change::Node(node));
+                }
                 Ok(Change::Accepted {
-                    node: Node {
-                        id,
-                        kind: p.kind,
-                        title: p.title.clone(),
-                        body: p.body.clone(),
-                        author,
-                        version: 1,
-                        created_ms: ts_ms,
-                        updated_ms: ts_ms,
-                        history: alloc::vec![e.hash],
-                        concurrent: false,
-                    },
+                    node,
                     edge: Edge {
                         id: EdgeId::from_entry_hash(&e.hash),
                         from: id,
@@ -317,7 +323,7 @@ impl Change {
                 })
             }
             Op::RejectProposal { proposal: p } => {
-                check_proposal(p, view)?;
+                check_proposal(p, view, e.is_pruned(), false)?;
                 Ok(Change::Rejected)
             }
             // Which devices count is decided by `Trust`, not by the graph.
@@ -461,9 +467,21 @@ fn check_evidence(keys: &[Hash], items: &[Evidence], pruned: bool) -> Result<(),
     Ok(())
 }
 
-/// Same rules for accepting and rejecting: a proposal names a known goal and known sources.
-fn check_proposal(p: &Proposal, view: &impl Lookup) -> Result<(), ApplyError> {
-    if p.title.trim().is_empty() {
+/// A proposal names a known goal and known sources. Returns whether the goal is there.
+///
+/// - An entry whose content was removed (E2) has no title any more and still applies: a
+///   device that receives it that way must see the node come and go like every other device,
+///   or it would never learn that the node was deleted.
+/// - `accepted`: a goal or source that was deleted meanwhile (on another device) does not
+///   undo what the human accepted. Otherwise the new node would vanish without ever having
+///   been deleted — and could not be deleted, with its text left in the chain.
+fn check_proposal(
+    p: &Proposal,
+    view: &impl Lookup,
+    pruned: bool,
+    accepted: bool,
+) -> Result<bool, ApplyError> {
+    if !pruned && p.title.trim().is_empty() {
         return Err(ApplyError::EmptyTitle);
     }
     if p.sources.is_empty() {
@@ -471,10 +489,13 @@ fn check_proposal(p: &Proposal, view: &impl Lookup) -> Result<(), ApplyError> {
     }
     for id in core::iter::once(&p.goal).chain(&p.sources) {
         if view.node(id).is_none() {
-            return Err(missing(id, view));
+            match missing(id, view) {
+                ApplyError::Gone(_) if accepted => {}
+                other => return Err(other),
+            }
         }
     }
-    Ok(())
+    Ok(view.node(&p.goal).is_some())
 }
 
 /// Why a node is not there: deleted for good, or not known (yet).

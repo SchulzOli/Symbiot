@@ -41,6 +41,10 @@ bestimmt das für jede Eintragsart mit einer Regel (`LedgerEntry::about`). Ein g
 Grabstein bekannt: Schreibt ein anderes Gerät später noch etwas über ihn, verliert auch dieser Eintrag seinen
 Inhalt, auf jedem Gerät. `DecideSuggestion` nennt dafür im Kopf die Einträge, die es ausgeführt hat.
 
+Löschen gewinnt für den gelöschten Knoten selbst, nicht für das, was daraus entstand: Nimmt jemand an einem Gerät
+einen Schritt an, während ein anderes Gerät dessen Ziel löscht, bleibt der Schritt bestehen, ohne die Verbindung.
+Vorher verschwand er, ohne je gelöscht worden zu sein, und sein Text blieb unlöschbar in der Kette.
+
 ## E3 — „Löschbar“ und „exportierbar“ entscheidet der Mensch, pro Knoten · *entschieden, umgesetzt*
 
 - Bei jedem neuen Knoten lässt sich festlegen, ob er **löschbar** und ob er **exportierbar** ist.

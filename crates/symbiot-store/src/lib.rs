@@ -390,6 +390,11 @@ impl Store {
     /// F4: the human accepted an AI proposal. Signs the decision with the full proposal and
     /// creates the new node plus its edge „derives from“ the goal.
     pub fn accept_proposal(&mut self, proposal: Proposal) -> Result<(Node, Edge)> {
+        // Here and now the goal and the sources must be there. (In the merged history of
+        // several devices a goal deleted elsewhere does not undo the step, see the core.)
+        for id in std::iter::once(&proposal.goal).chain(&proposal.sources) {
+            self.node(*id)?.ok_or(Error::UnknownNode(*id))?;
+        }
         match self.append(Op::AcceptProposal { proposal })? {
             Change::Accepted { node, edge } => Ok((node, edge)),
             _ => unreachable!("AcceptProposal yields a node and an edge"),

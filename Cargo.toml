@@ -7,3 +7,13 @@ version = "0.3.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/SchulzOli/Symbiot"
+
+# Signatures and hashes are slow without optimisation, and the tests check thousands of them.
+[profile.dev.package.curve25519-dalek]
+opt-level = 3
+
+[profile.dev.package.ed25519-dalek]
+opt-level = 3
+
+[profile.dev.package.sha2]
+opt-level = 3

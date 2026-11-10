@@ -227,6 +227,9 @@ async fn concurrent_edits_end_the_same_everywhere() {
         .unwrap()
         .update_node(goal.id, "Laufen (PC)", "")
         .unwrap();
+    // Later on the clock, not only in this test: within one millisecond the device key
+    // decides, not the order.
+    tokio::time::sleep(std::time::Duration::from_millis(3)).await;
     phone
         .lock()
         .unwrap()

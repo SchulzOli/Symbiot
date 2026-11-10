@@ -165,6 +165,84 @@ fn an_edit_after_the_deletion_loses_its_text_on_every_device() {
     }
 }
 
+/// Found by the property test below: a node made by an accepted proposal, deleted before the
+/// other device ever saw it. That device receives the entry without its content — it must
+/// still learn that the node existed and is gone, or what it wrote about it keeps its text.
+#[test]
+fn a_node_that_arrives_already_deleted_is_still_known_as_deleted() {
+    let words = new_words().unwrap();
+    let (mut a, mut b) = (store(7), store(8));
+    a.certify_self(&words, "a").unwrap();
+    b.certify_self(&words, "b").unwrap();
+    let goal = a.create_node(NodeKind::Goal, "Ziel", "").unwrap();
+    let (step, _) = a
+        .accept_proposal(proposal(goal.id, "GEHEIM Schritt"))
+        .unwrap();
+    a.delete_node(step.id).unwrap();
+    // B writes about the node without knowing it: the action fails, the decision is kept.
+    let out = b
+        .decide_suggestion(
+            suggestion(
+                "GEHEIM ändern",
+                vec![update(step.id, "GEHEIM 2")],
+                vec![step.id],
+            ),
+            true,
+            &[0],
+        )
+        .unwrap();
+    assert!(out.error.is_some());
+    pass(&a, &mut b);
+    pass(&b, &mut a);
+    for s in [&a, &b] {
+        assert_eq!(s.nodes(None).unwrap().len(), 1, "only the goal");
+        assert_eq!(holds(&chains(s), "GEHEIM"), Vec::<u16>::new());
+        assert!(s.verify_all().unwrap().iter().all(|r| r.ok));
+    }
+}
+
+/// A step accepted on one device while another deletes its goal: the step stays (without the
+/// connection) instead of vanishing — and can be deleted like any node, text and all.
+#[test]
+fn a_step_outlives_its_goal_and_can_be_deleted() {
+    let words = new_words().unwrap();
+    let (mut a, mut b) = (store(9), store(10));
+    a.certify_self(&words, "a").unwrap();
+    b.certify_self(&words, "b").unwrap();
+    let goal = a.create_node(NodeKind::Goal, "Ziel", "").unwrap();
+    pass(&a, &mut b);
+    a.delete_node(goal.id).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(3));
+    let (step, _) = b
+        .accept_proposal(proposal(goal.id, "BLEIBT Schritt"))
+        .unwrap();
+    pass(&a, &mut b);
+    pass(&b, &mut a);
+    for s in [&a, &b] {
+        let titles: Vec<String> = s
+            .nodes(None)
+            .unwrap()
+            .into_iter()
+            .map(|n| n.title)
+            .collect();
+        assert_eq!(titles, ["BLEIBT Schritt"]);
+        assert!(
+            s.edges().unwrap().is_empty(),
+            "the goal is gone, so is the connection"
+        );
+    }
+    // Here and now a proposal for a deleted goal cannot be accepted.
+    assert!(a.accept_proposal(proposal(goal.id, "zu spät")).is_err());
+
+    a.delete_node(step.id).unwrap();
+    pass(&a, &mut b);
+    for s in [&a, &b] {
+        assert!(s.nodes(None).unwrap().is_empty());
+        assert_eq!(holds(&chains(s), "BLEIBT"), Vec::<u16>::new());
+        assert!(s.verify_all().unwrap().iter().all(|r| r.ok));
+    }
+}
+
 /// E3: the text of a node that is not exportable is in nothing a device hands on.
 #[test]
 fn not_exportable_text_stays_home_whatever_made_it() {
@@ -286,7 +364,7 @@ fn step() -> impl Strategy<Value = Step> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(32))]
+    #![proptest_config(ProptestConfig::with_cases(600))]
 
     /// E2 acceptance (H1): three devices create, change and delete nodes on every way there
     /// is and sync in any order. In the end no device holds the text of a deleted node in any
