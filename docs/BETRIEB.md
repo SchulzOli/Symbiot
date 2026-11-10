@@ -62,6 +62,7 @@ Die Geräte gleichen über den Heimserver ab. Auf dem Heimserver selbst ist nich
 
 1. **Heimserver bestätigen:** `https://heimserver.example.ts.net:8449` öffnen, unter „Geräte“ den Personen-Schlüssel
    anlegen. Die 24 Wörter aufschreiben oder in den Passwort-Manager legen; sie werden nirgends gespeichert.
+   Sie entstehen im Browser und werden dort zur Signatur; der Heimserver bekommt nur die fertige Bestätigung.
 2. **Desktop:** Unter „Geräte“ (steht oben, solange das Gerät nicht eingerichtet ist) „Vorhandenen Schlüssel
    eingeben“ und einen Namen vergeben, dann bei „Adresse des Heimservers“ `https://heimserver.example.ts.net:8449` eintragen
    und speichern. Die App merkt sich die Adresse (`sync-url.txt` im Datenordner) und gleicht jede Minute ab,

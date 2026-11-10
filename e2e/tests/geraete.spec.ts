@@ -2,6 +2,9 @@ import { expect, test } from "@playwright/test";
 
 // M4 / E5 in the web UI on the home server: set up a new person key, check three words, confirm this device.
 test("Personen-Schlüssel anlegen und Gerät bestätigen", async ({ page }) => {
+  // H6: everything this page sends to the home server, to prove the words are not in it.
+  const sent: string[] = [];
+  page.on("request", (r) => sent.push(`${r.method()} ${r.url()} ${r.postData() ?? ""}`));
   await page.goto("/");
   // E15: a note leads to the setup; the panel opens from it (or from the toolbar).
   await page.getByTestId("setup-banner").getByRole("button", { name: "Einrichten" }).click();
@@ -33,6 +36,17 @@ test("Personen-Schlüssel anlegen und Gerät bestätigen", async ({ page }) => {
   await expect(devices.getByText("Dies ist der Heimserver: Hier gleichen deine Geräte ab.")).toBeVisible();
   // The words are gone from the page once confirmed.
   await expect(devices.getByTestId("words")).toHaveCount(0);
+
+  // H6: the words were made and turned into a signature in this page. The home server got the
+  // finished certificate — no request carried any of the 24 words.
+  const certify = sent.filter((s) => s.includes("/api/person/certify"));
+  expect(certify).toHaveLength(1);
+  expect(certify[0]).toContain('"sig"');
+  for (const request of sent) {
+    for (const word of words) {
+      expect(request, `„${word}“ wurde gesendet`).not.toMatch(new RegExp(`\\b${word}\\b`));
+    }
+  }
 
   // The certificate is one signed entry in this device's chain.
   await page.getByRole("button", { name: "Kette prüfen" }).click();

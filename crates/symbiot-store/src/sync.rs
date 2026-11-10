@@ -7,7 +7,10 @@
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
-use symbiot_core::{Hash, LedgerEntry, Person, PubKey, Trust, kind, verify_after};
+use symbiot_core::{
+    Hash, LedgerEntry, Op, Person, PubKey, Sig, Trust, certificate_is_valid, kind,
+    revocation_is_valid, verify_after,
+};
 
 use crate::{
     Error, Result, Store, decode_entry, device_entries, insert_entry, node_ids, raw_entry,
@@ -39,25 +42,14 @@ pub struct DeviceInfo {
 pub fn new_words() -> Result<String> {
     let mut entropy = [0u8; 32];
     getrandom::fill(&mut entropy).map_err(|_| Error::Invalid("kein Zufall verfügbar"))?;
-    let words = bip39::Mnemonic::from_entropy(&entropy)
-        .map_err(|_| Error::Invalid("Wörter nicht erzeugbar"))?;
-    Ok(words.to_string())
+    Ok(symbiot_words::words_from_entropy(entropy))
 }
 
 /// The person key behind the words. Spaces, line breaks and case do not matter.
 fn person_from(words: &str) -> Result<Person> {
-    let normal = words
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_lowercase();
-    let m = bip39::Mnemonic::parse_normalized(&normal)
-        .map_err(|_| Error::Invalid("Die Wörter stimmen nicht (24 Wörter, Prüfsumme)"))?;
-    let entropy: [u8; 32] = m
-        .to_entropy()
-        .try_into()
-        .map_err(|_| Error::Invalid("Es braucht 24 Wörter"))?;
-    Ok(Person::from_entropy(entropy))
+    symbiot_words::person_from_words(words).ok_or(Error::Invalid(
+        "Die Wörter stimmen nicht (24 Wörter, Prüfsumme)",
+    ))
 }
 
 impl Store {
@@ -74,11 +66,27 @@ impl Store {
     pub fn certify_self(&mut self, words: &str, name: &str) -> Result<PubKey> {
         let person = person_from(words)?;
         let name = name.trim();
-        if name.is_empty() {
+        let Op::CertifyDevice { person, sig, .. } = person.certify(self.device(), name) else {
+            unreachable!("certify yields a certificate")
+        };
+        self.certify_signed(name, person, sig)
+    }
+
+    /// H6: confirms this device with a certificate signed elsewhere — in the browser, where
+    /// the human typed the words. This device never sees them. The signature must be the
+    /// person's confirmation of exactly this device under exactly this name.
+    pub fn certify_signed(&mut self, name: &str, person: PubKey, sig: Sig) -> Result<PubKey> {
+        if name.is_empty() || name != name.trim() {
             return Err(Error::Invalid("Das Gerät braucht einen Namen"));
         }
+        let device = self.device();
+        if !certificate_is_valid(&device, name, &person, &sig) {
+            return Err(Error::Invalid(
+                "Die Bestätigung passt nicht zu diesem Gerät und Namen",
+            ));
+        }
         match self.person()? {
-            Some(p) if p == person.public() => return Ok(p),
+            Some(p) if p == person => return Ok(p),
             Some(_) => {
                 return Err(Error::Invalid(
                     "Dieses Gerät gehört schon zu einem anderen Personen-Schlüssel",
@@ -86,13 +94,17 @@ impl Store {
             }
             None => {}
         }
-        self.append(person.certify(self.device(), name))?;
+        self.append(Op::CertifyDevice {
+            device,
+            name: name.into(),
+            person,
+            sig,
+        })?;
         // Chains received earlier may count now.
-        let me = self.device();
         let tx = self.conn.transaction()?;
-        rebuild_projection(&tx, &me)?;
+        rebuild_projection(&tx, &device)?;
         tx.commit()?;
-        Ok(person.public())
+        Ok(person)
     }
 
     /// E5: a lost or stolen device. Its entries after the last one known here no longer count,
@@ -100,6 +112,28 @@ impl Store {
     pub fn revoke_device(&mut self, words: &str, device: PubKey) -> Result<()> {
         let person = person_from(words)?;
         if self.person()? != Some(person.public()) {
+            return Err(Error::Invalid("Die Wörter gehören nicht zu diesem Gerät"));
+        }
+        let last = self
+            .tip(&device)?
+            .ok_or(Error::Invalid("Dieses Gerät ist hier nicht bekannt"))?;
+        let Op::RevokeDevice { person, sig, .. } = person.revoke(device, last.seq) else {
+            unreachable!("revoke yields a revocation")
+        };
+        self.revoke_signed(device, last.seq, person, sig)
+    }
+
+    /// H6: revokes a device with a revocation signed elsewhere (see
+    /// [`Store::certify_signed`]). `last_seq` must be the last entry of the device known
+    /// here, so the cut is where the human saw it.
+    pub fn revoke_signed(
+        &mut self,
+        device: PubKey,
+        last_seq: u64,
+        person: PubKey,
+        sig: Sig,
+    ) -> Result<()> {
+        if self.person()? != Some(person) {
             return Err(Error::Invalid("Die Wörter gehören nicht zu diesem Gerät"));
         }
         if device == self.device() {
@@ -110,7 +144,20 @@ impl Store {
         let last = self
             .tip(&device)?
             .ok_or(Error::Invalid("Dieses Gerät ist hier nicht bekannt"))?;
-        self.append(person.revoke(device, last.seq))?;
+        if last.seq != last_seq {
+            return Err(Error::Invalid(
+                "Das Gerät hat inzwischen weitere Einträge geschickt. Bitte noch einmal widerrufen",
+            ));
+        }
+        if !revocation_is_valid(&device, last_seq, &person, &sig) {
+            return Err(Error::Invalid("Der Widerruf passt nicht zu diesem Gerät"));
+        }
+        self.append(Op::RevokeDevice {
+            device,
+            last_seq,
+            person,
+            sig,
+        })?;
         let me = self.device();
         let tx = self.conn.transaction()?;
         rebuild_projection(&tx, &me)?;
@@ -376,4 +423,76 @@ fn as_hash(bytes: Vec<u8>) -> Result<Hash> {
     Ok(Hash(bytes.try_into().map_err(|_| {
         Error::Invalid("ungültiger Hash in der Datenbank")
     })?))
+}
+
+#[cfg(test)]
+mod tests {
+    use symbiot_core::{NodeKind, Signer};
+
+    use super::*;
+
+    fn store(seed: u8) -> Store {
+        Store::open_in_memory(Signer::from_seed([seed; 32])).unwrap()
+    }
+
+    /// H6: a certificate and a revocation signed elsewhere are taken only if they are the
+    /// person's word about exactly this device, this name and this point of the chain.
+    #[test]
+    fn signed_elsewhere_is_checked_here() {
+        let words = new_words().unwrap();
+        let key = person_from(&words).unwrap();
+        let (mut home, mut pc) = (store(1), store(2));
+        let cert = |device: PubKey, name: &str| match key.certify(device, name) {
+            Op::CertifyDevice { person, sig, .. } => (person, sig),
+            _ => unreachable!(),
+        };
+
+        // For another device, another name, by another person: refused, nothing written.
+        let (person, sig) = cert(pc.device(), "Heim");
+        assert!(home.certify_signed("Heim", person, sig).is_err());
+        let (person, sig) = cert(home.device(), "Heim");
+        assert!(home.certify_signed("Anders", person, sig).is_err());
+        assert!(home.certify_signed("", person, sig).is_err());
+        let stranger = person_from(&new_words().unwrap()).unwrap().public();
+        assert!(home.certify_signed("Heim", stranger, sig).is_err());
+        assert_eq!(home.person().unwrap(), None);
+        assert!(home.entries().unwrap().is_empty());
+
+        assert_eq!(home.certify_signed("Heim", person, sig).unwrap(), person);
+        assert_eq!(home.certify_signed("Heim", person, sig).unwrap(), person);
+        assert_eq!(
+            home.entries().unwrap().len(),
+            1,
+            "repeating changes nothing"
+        );
+        // The same as with the words on the device itself.
+        pc.certify_self(&words, "PC").unwrap();
+        assert_eq!(pc.person().unwrap(), Some(person));
+
+        pc.create_node(NodeKind::Goal, "Ziel", "").unwrap();
+        home.receive(pc.chain_since(&pc.device(), None).unwrap())
+            .unwrap();
+        let cut = home.tip(&pc.device()).unwrap().unwrap().seq;
+        let revoke = |device: PubKey, seq: u64| match key.revoke(device, seq) {
+            Op::RevokeDevice { sig, .. } => sig,
+            _ => unreachable!(),
+        };
+        // An older cut, a signature for another cut, this device itself: refused.
+        assert!(
+            home.revoke_signed(pc.device(), cut - 1, person, revoke(pc.device(), cut - 1))
+                .is_err()
+        );
+        assert!(
+            home.revoke_signed(pc.device(), cut, person, revoke(pc.device(), cut + 1))
+                .is_err()
+        );
+        assert!(
+            home.revoke_signed(home.device(), 0, person, revoke(home.device(), 0))
+                .is_err()
+        );
+        assert!(home.trusts(&pc.device()).unwrap());
+        home.revoke_signed(pc.device(), cut, person, revoke(pc.device(), cut))
+            .unwrap();
+        assert!(!home.trusts(&pc.device()).unwrap());
+    }
 }

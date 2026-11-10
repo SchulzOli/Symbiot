@@ -24,6 +24,7 @@ Hervorgegangen aus dem Ideengarten *TrustInAI*. Benannt nach der *Symbiose Mensc
 |---|---|
 | `crates/symbiot-core` | `no_std`-Kern: Knoten, signierte Hash-Kette (Kopf + entfernbarer Inhalt), Prüfung, Projektion, Rohdaten-Format (E14) |
 | `crates/symbiot-store` | SQLite: Kette als Wahrheit, Knoten und Rohdaten als Projektion, Geräteschlüssel |
+| `crates/symbiot-words` | Die 24 Wörter des Personen-Schlüssels (E5): dieselbe Stelle auf dem Gerät und im Browser |
 | `crates/symbiot-sync` | Abgleich (M4): signierte Anfragen, Client, der die eigene Kette sendet und fehlende holt |
 | `crates/symbiot-import` | Import-Adapter (E14): Telegram, WhatsApp, mbox, Git. Werkzeug `symbiot-import`, siehe [ROHDATEN.md](docs/ROHDATEN.md#importieren-symbiot-import) |
 | `crates/symbiot-ai` | „Nächsten Schritt vorschlagen“: Kontext, Anfrage an LiteLLM, Prüfung der Quellen. Schreibt nie |

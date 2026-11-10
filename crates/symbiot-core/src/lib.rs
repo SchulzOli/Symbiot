@@ -29,7 +29,7 @@ pub use ledger::{
     build_chain, verify_after, verify_chain, verify_message,
 };
 pub use node::{ApplyError, Change, Lookup, Node, NodeKind, Policy, Replay, State, replay};
-pub use person::{Device, Person, Trust};
+pub use person::{Device, Person, Trust, certificate_is_valid, revocation_is_valid};
 pub use proposal::Proposal;
 pub use rule::Rule;
 
