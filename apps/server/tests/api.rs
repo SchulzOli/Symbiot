@@ -917,3 +917,57 @@ async fn writes_from_outside_the_interface_are_refused() {
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(res.headers()["cross-origin-resource-policy"], "same-origin");
 }
+
+/// H6: the home server is confirmed and a device revoked with what the browser signed. The 24
+/// words are not part of any request, and a request that carries them is refused.
+#[tokio::test]
+async fn person_key_signs_in_the_browser_and_the_words_stay_there() {
+    let app = app();
+    let (_, info) = call(&app, "GET", "/api/person", None).await;
+    assert!(info["person"].is_null());
+    let device = symbiot_core::PubKey::from_hex(info["device"].as_str().unwrap()).unwrap();
+
+    // What the interface does: words → person key → signature, all on its side.
+    let words = symbiot_words::words_from_entropy([3; 32]);
+    let key = symbiot_words::person_from_words(&words).unwrap();
+    let symbiot_core::Op::CertifyDevice { person, sig, .. } = key.certify(device, "Heimserver")
+    else {
+        unreachable!()
+    };
+
+    // The old form with the words, and the route that made words on the server, are gone.
+    let with_words = json!({"words": words, "name": "Heimserver"});
+    let (status, _) = call(&app, "POST", "/api/person/certify", Some(with_words)).await;
+    assert!(status.is_client_error(), "{status}");
+    let (status, _) = call(&app, "POST", "/api/person/words", None).await;
+    assert!(status.is_client_error(), "{status}");
+    let smuggled = json!({"name": "Heimserver", "person": person, "sig": sig, "words": words});
+    let (status, _) = call(&app, "POST", "/api/person/certify", Some(smuggled)).await;
+    assert!(status.is_client_error(), "{status}");
+
+    // A certificate for another name or another device does not fit.
+    let wrong = json!({"name": "Anders", "person": person, "sig": sig});
+    let (status, _) = call(&app, "POST", "/api/person/certify", Some(wrong)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (_, info) = call(&app, "GET", "/api/person", None).await;
+    assert!(info["person"].is_null(), "nothing was written");
+
+    let signed = json!({"name": "Heimserver", "person": person, "sig": sig});
+    let (status, info) = call(&app, "POST", "/api/person/certify", Some(signed)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(info["person"], json!(person));
+    assert_eq!(info["devices"][0]["name"], "Heimserver");
+
+    // A revocation needs a device known here, the cut the interface saw and the person's key.
+    let lost = symbiot_core::Signer::from_seed([9; 32]).public();
+    let symbiot_core::Op::RevokeDevice { sig, .. } = key.revoke(lost, 0) else {
+        unreachable!()
+    };
+    let revoke = json!({"device": lost, "last_seq": 0, "person": person, "sig": sig});
+    let (status, body) = call(&app, "POST", "/api/person/revoke", Some(revoke)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        body["error"].as_str().unwrap().contains("nicht bekannt"),
+        "{body}"
+    );
+}

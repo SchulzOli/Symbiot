@@ -121,8 +121,9 @@ Ansatz. Wichtig: Der **Geräteschlüssel wird dabei nicht mit umgezogen.**
 einen Gerät. Geht das Gerät verloren, ist er weg. Beim Setzen des Schalters erscheint dieser Hinweis.
 
 **Abweichungen (2026-11-10, PLAN H5 und H6):**
-- Die Wörter sind öfter unterwegs, als „nie gespeichert“ nahelegt: Die Web-Oberfläche schickt sie an den Heimserver,
-  der damit signiert, und jeder Import-Adapter braucht sie einmal (`SYMBIOT_WORDS`).
+- Seit H6a (2026-11-10) entstehen die Wörter im Browser und werden dort zur Signatur; der Heimserver sieht sie nie.
+  Offen bleibt: Jeder Import-Adapter braucht sie einmal (`SYMBIOT_WORDS`, auf dem Rechner des Werkzeugs). Vorschlag
+  H6b: Ein bestätigtes Gerät bestätigt Adapter.
 - BETRIEB.md empfiehlt, `device.key` des Heimservers zu sichern. Wer ein älteres Backup zurückspielt und
   weiterschreibt, erzeugt eine zweite Geschichte derselben Kette; die Geräte lehnen sie dauerhaft ab. Der Weg
   „neuer Geräteschlüssel, bestätigen, alles wieder holen“ fehlt noch: Geräte senden heute nur ihre eigene Kette,

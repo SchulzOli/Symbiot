@@ -82,6 +82,20 @@ fn signed_by(person: &PubKey, message: &[u8], sig: &Sig) -> bool {
         .is_ok()
 }
 
+/// Whether `sig` is `person`'s confirmation of `device` under `name` — what
+/// [`Person::certify`] signs. For whoever writes a certificate it did not sign itself (H6):
+/// the words are turned into this signature where the human types them, not on the device
+/// that stores the entry.
+pub fn certificate_is_valid(device: &PubKey, name: &str, person: &PubKey, sig: &Sig) -> bool {
+    signed_by(person, &cert_message(device, name), sig)
+}
+
+/// Whether `sig` is `person`'s revocation of `device` after `last_seq` — what
+/// [`Person::revoke`] signs.
+pub fn revocation_is_valid(device: &PubKey, last_seq: u64, person: &PubKey, sig: &Sig) -> bool {
+    signed_by(person, &revoke_message(device, last_seq), sig)
+}
+
 /// A device of the person, as the chains say.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Device {

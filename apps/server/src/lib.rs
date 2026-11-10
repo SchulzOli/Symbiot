@@ -84,7 +84,6 @@ pub fn app(store: Store, ui_dir: Option<PathBuf>, ai: Option<Arc<dyn Advisor>>) 
         .route("/ledger/verify", get(verify))
         .route("/ledger/verify-all", get(verify_all))
         .route("/person", get(person))
-        .route("/person/words", post(new_words))
         .route("/person/certify", post(certify))
         .route("/person/revoke", post(revoke))
         .route("/files/{hash}", get(get_file))
@@ -805,45 +804,40 @@ async fn person(State(s): State<Shared>) -> Result<Json<PersonInfo>, ApiError> {
     }))
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct Words {
-    pub words: String,
-}
-
-/// 24 new recovery words. Nothing is stored; they are only shown once.
-async fn new_words() -> Result<Json<Words>, ApiError> {
-    Ok(Json(Words {
-        words: symbiot_store::new_words()?,
-    }))
-}
-
+/// H6: the confirmation of this device, signed in the browser where the human typed the 24
+/// words. The words themselves are never sent here; a body that carries them is refused.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Certify {
-    pub words: String,
     pub name: String,
+    pub person: PubKey,
+    pub sig: symbiot_core::Sig,
 }
 
 async fn certify(
     State(s): State<Shared>,
     Json(c): Json<Certify>,
 ) -> Result<Json<PersonInfo>, ApiError> {
-    let person = lock(&s).certify_self(&c.words, &c.name)?;
-    // Never the words in the log.
+    let person = lock(&s).certify_signed(&c.name, c.person, c.sig)?;
     tracing::info!(%person, name = %c.name, "device certified");
     person_info(&s)
 }
 
+/// H6: the revocation of a device after its entry `last_seq`, signed in the browser.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Revoke {
-    pub words: String,
     pub device: PubKey,
+    pub last_seq: u64,
+    pub person: PubKey,
+    pub sig: symbiot_core::Sig,
 }
 
 async fn revoke(
     State(s): State<Shared>,
     Json(r): Json<Revoke>,
 ) -> Result<Json<PersonInfo>, ApiError> {
-    lock(&s).revoke_device(&r.words, r.device)?;
+    lock(&s).revoke_signed(r.device, r.last_seq, r.person, r.sig)?;
     tracing::warn!(device = %r.device, "device revoked");
     person_info(&s)
 }

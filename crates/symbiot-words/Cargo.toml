@@ -1,0 +1,11 @@
+[package]
+name = "symbiot-words"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The 24 recovery words of the person key (E5): the same on every device and in the browser."
+
+[dependencies]
+bip39 = "2"
+symbiot-core = { version = "0.3.0", path = "../symbiot-core" }

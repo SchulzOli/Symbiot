@@ -219,42 +219,94 @@ struct Words {
     words: String,
 }
 
+const WRONG_WORDS: &str = "Die Wörter stimmen nicht (24 Wörter, Prüfsumme)";
+
 /// 24 new recovery words. Nothing is stored anywhere.
+///
+/// H6: in the browser the words are made here, from the browser's own randomness, and never
+/// leave the page. In the app they come from the app's own process.
 pub async fn new_words() -> ApiResult<String> {
     #[derive(Serialize)]
     struct NoArgs {}
-    let w: Words = if tauri_invoke_fn().is_some() {
-        invoke("new_words", &NoArgs {}).await?
-    } else {
-        http_json(write::post("/api/person/words").build()).await?
-    };
-    Ok(w.words)
+    if tauri_invoke_fn().is_some() {
+        let w: Words = invoke("new_words", &NoArgs {}).await?;
+        return Ok(w.words);
+    }
+    let mut entropy = [0u8; 32];
+    web_sys::window()
+        .ok_or("kein Fenster")?
+        .crypto()
+        .map_err(js_error)?
+        .get_random_values_with_u8_array(&mut entropy)
+        .map_err(js_error)?;
+    Ok(symbiot_words::words_from_entropy(entropy))
 }
 
+/// Confirms the device this interface belongs to for the person behind `words`.
+///
+/// H6: in the browser the words are turned into the signature right here; the home server
+/// gets the finished certificate and never the words. In the app the words stay inside the
+/// app's own process.
 pub async fn certify(words: String, name: String) -> ApiResult<PersonInfo> {
-    #[derive(Serialize)]
-    struct Args {
-        words: String,
-        name: String,
-    }
-    let args = Args { words, name };
     if tauri_invoke_fn().is_some() {
-        return invoke("certify", &args).await;
+        #[derive(Serialize)]
+        struct Args {
+            words: String,
+            name: String,
+        }
+        return invoke("certify", &Args { words, name }).await;
     }
-    http_json(write::post("/api/person/certify").json(&args)).await
+    #[derive(Serialize)]
+    struct Signed {
+        name: String,
+        person: PubKey,
+        sig: symbiot_core::Sig,
+    }
+    let key = symbiot_words::person_from_words(&words).ok_or(WRONG_WORDS)?;
+    let name = name.trim().to_string();
+    let device = person().await?.device;
+    let symbiot_core::Op::CertifyDevice { person, sig, .. } = key.certify(device, &name) else {
+        return Err("Bestätigung nicht erzeugbar".into());
+    };
+    http_json(write::post("/api/person/certify").json(&Signed { name, person, sig })).await
 }
 
+/// Revokes a lost device. Signed here like [`certify`]; the cut is the last entry of the
+/// device that this interface shows.
 pub async fn revoke(words: String, device: PubKey) -> ApiResult<PersonInfo> {
-    #[derive(Serialize)]
-    struct Args {
-        words: String,
-        device: PubKey,
-    }
-    let args = Args { words, device };
     if tauri_invoke_fn().is_some() {
-        return invoke("revoke", &args).await;
+        #[derive(Serialize)]
+        struct Args {
+            words: String,
+            device: PubKey,
+        }
+        return invoke("revoke", &Args { words, device }).await;
     }
-    http_json(write::post("/api/person/revoke").json(&args)).await
+    #[derive(Serialize)]
+    struct Signed {
+        device: PubKey,
+        last_seq: u64,
+        person: PubKey,
+        sig: symbiot_core::Sig,
+    }
+    let key = symbiot_words::person_from_words(&words).ok_or(WRONG_WORDS)?;
+    let last_seq = person()
+        .await?
+        .devices
+        .iter()
+        .find(|d| d.key == device)
+        .and_then(|d| d.entries.checked_sub(1))
+        .ok_or("Dieses Gerät ist hier nicht bekannt")?;
+    let symbiot_core::Op::RevokeDevice { person, sig, .. } = key.revoke(device, last_seq) else {
+        return Err("Widerruf nicht erzeugbar".into());
+    };
+    let signed = Signed {
+        device,
+        last_seq,
+        person,
+        sig,
+    };
+    http_json(write::post("/api/person/revoke").json(&signed)).await
 }
 
 /// Mirrors `symbiot_sync::Report`.

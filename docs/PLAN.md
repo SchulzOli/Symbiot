@@ -143,15 +143,19 @@ Rohdaten in die Kette des Heimservers schreiben, wenn sie die Adresse kannte.
 - **Abgenommen durch:** `writes_from_outside_the_interface_are_refused` in `apps/server/tests/api.rs`; die
   E2E-Tests laufen mit der Policy.
 
-#### H6 — Die 24 Wörter bleiben selten *(E5, E7, #50)*
-**Heute:** Die Web-Oberfläche schickt die Wörter an den Heimserver. Jeder Import-Adapter braucht sie einmal. Der
-Import aus der App schreibt in die Kette des Menschen-Geräts.
-- **H6a:** Signiert wird dort, wo die Wörter eingegeben werden, im Browser bzw. in der App. Der Heimserver bekommt
-  nur die fertige Bestätigung oder den fertigen Widerruf.
+#### H6 — Die 24 Wörter bleiben selten *(E5, E7, #50 · H6a umgesetzt, H6b wartet auf deine Entscheidung)*
+**War:** Die Web-Oberfläche schickte die Wörter an den Heimserver, der sie auch erzeugte. Jeder Import-Adapter
+braucht sie einmal. Der Import aus der App schreibt in die Kette des Menschen-Geräts.
+- **H6a (umgesetzt):** Die Wörter entstehen im Browser und werden dort zur Signatur. Der Heimserver bekommt nur die
+  fertige Bestätigung oder den fertigen Widerruf und prüft sie; eine Anfrage, die Wörter enthält, lehnt er ab. In
+  der Desktop- und Android-App bleiben die Wörter im Prozess der App. Eine Stelle für die Wörter:
+  `crates/symbiot-words`.
 - **H6b (Vorschlag, braucht deine Entscheidung):** Ein bestätigtes Gerät darf Adapter bestätigen und widerrufen.
   Dann braucht kein Adapter die Wörter, und die App kann pro Quelle einen eigenen Adapter-Schlüssel führen. Bis
-  dahin bleibt der Import aus der App in der Kette des Geräts, und E7 nennt das als Ausnahme.
-- **Fertig, wenn:** Die Wörter stehen in keiner Anfrage an den Heimserver (API-Test, E2E).
+  dahin bleibt der Import aus der App in der Kette des Geräts, und `symbiot-import` liest die Wörter einmal aus
+  `SYMBIOT_WORDS` (sie bleiben auf dem Rechner, auf dem das Werkzeug läuft).
+- **Abgenommen durch:** `e2e/tests/geraete.spec.ts` (keine Anfrage enthält eines der 24 Wörter),
+  `person_key_signs_in_the_browser_and_the_words_stay_there` (API), `signed_elsewhere_is_checked_here` (Store).
 
 #### H5 — Verschlüsselt, mit Backup und Weg zurück *(E5, E6, #22)*
 **Heute:** Datenbank, Dateien und Geräteschlüssel liegen im Klartext. Ein älteres Backup des Heimservers
@@ -199,7 +203,7 @@ oder deckt einen Weg nicht ab.
 | Nicht exportierbar verlässt das Gerät nie | E3 | `zusagen.rs`, `apps/server/tests/sync.rs` | hält (H2) |
 | Sensibles erreicht kein externes Modell | E4 | `crates/symbiot-ai`, `apps/server/tests/api.rs` | hält für Knoten |
 | Nur Geräte der Person gleichen ab, Widerruf gilt | E5 | `apps/server/tests/sync.rs` | hält |
-| Die Wörter werden nie gespeichert und selten benutzt | E5 | – | offen (H6) |
+| Die Wörter verlassen das Gerät nicht, an dem sie getippt werden | E5 | `e2e/tests/geraete.spec.ts`, `apps/server/tests/api.rs` | hält (H6a); Adapter brauchen sie noch (H6b) |
 | Der Speicher ist verschlüsselt | E6 | – | offen (H5) |
 | Texte von außen sind Daten, nie Auftrag | E12 | – | offen, wird mit M8 Pflicht |
 | Fremde Webseiten können nichts schreiben | E12 | `apps/server/tests/api.rs` | hält (H4) |
