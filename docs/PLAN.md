@@ -28,32 +28,36 @@ Erst danach wird das Skelett dicker. Jeder Meilenstein endet mit einem **Checkpo
 | Meilenstein | Stand | Offen |
 |---|---|---|
 | M0 Fundament | fertig | – |
-| M1 Walking Skeleton | fertig (v0.1.0) | Alarme im Matrix-Raum (Teil des Checkpoints, bisher weggelassen) |
+| M1 Walking Skeleton | fertig (v0.1.0) | Alarme im Matrix-Raum (H7) |
 | M2 Verknüpfen | fertig (v0.2.0) | – |
 | M3 Mitdenken | fertig (v0.2.0) | Checkpoint: eine Woche selbst benutzen (#20) |
-| M4 Synchron | fertig (v0.3.0) | Checkpoints und Zeugen (#21), Verschlüsselung (#22) |
-| M5 Überall | auf `main`, APK baut in der CI | Release mit signiertem APK, Probe am echten Handy (#23) |
+| M4 Synchron | fertig (v0.3.0) | Checkpoints und Zeugen (#21) |
+| M5 Überall | in v0.4.0, APK baut in der CI | Release mit signiertem APK, Probe am echten Handy (#23) |
+| H Härtung | H1–H4, H6a, H5a (Heimserver), H5b umgesetzt | H5a in den Apps, H5c, H6b (Entscheidung), H7 |
 | M6 Sensor | nicht begonnen | alles (#24) |
-| M7 Integration | auf `main`: Format, vier Import-Adapter, Zeitleiste, Suche, Dateien, Quellen-Verwaltung, Import aus der App | Checkpoint mit echten Daten |
-| M8 Aufbereitung | Personen auf `main` | Aussagen, Themen, Fragen in Worten (#32) |
-| E15 Oberfläche, E16 Assistent | auf `main` | Vorschläge im Canvas, MCP (#25) |
+| M7 Integration | in v0.4.0: Format, vier Import-Adapter, Zeitleiste, Suche, Dateien, Quellen-Verwaltung, Import aus der App | Checkpoint mit echten Daten |
+| M8 Aufbereitung | Personen in v0.4.0 | Aussagen, Themen, Fragen in Worten (#32) |
+| E15 Oberfläche, E16 Assistent | in v0.4.0 | Vorschläge im Canvas, MCP (#25) |
 
-Seit v0.3.0 gab es keinen Release. Alles ab M5 läuft nur auf `main` und auf dem Heimserver.
+Die Version auf `main` ist 0.4.0. Der Heimserver zieht `main` von selbst; den Tag `v0.4.0` für Installer und APK
+setzt du (siehe H7).
 
 ## Reihenfolge ab jetzt *(E18)*
 
-In wenigen Tagen sind M5, M7, das halbe M8, E15 und E16 entstanden. Liegen geblieben sind Zusagen aus den
+In wenigen Tagen waren M5, M7, das halbe M8, E15 und E16 entstanden. Liegen geblieben waren Zusagen aus den
 Entscheidungen: wirklich löschen (E2), nicht exportieren (E3), verschlüsseln (E6), Backup (E5) und ein Abgleich,
-der mit der Datenmenge nicht langsamer wird. Seit den Importen liegen echte Nachrichten und Mails anderer Menschen
-unverschlüsselt auf Heimserver und Handy. Deshalb:
+der mit der Datenmenge nicht langsamer wird. Die Härtung hat das nachgeholt; was davon noch offen ist, steht unten
+bei H.
 
-1. **H — Härtung.** Keine neue Datenquelle und keine neue Aufbereitung, solange H offen ist.
-2. **Release v0.4.0** mit signiertem APK, F6 am echten Handy abnehmen.
+1. **Heimserver verschlüsseln und Daten anschließen.** Schlüssel eintragen
+   ([BETRIEB.md](BETRIEB.md#verschlüsselung-h5-e6)), dann importieren. Das ist zugleich der Checkpoint M7.
+2. **Release v0.4.0** mit signiertem APK, F6 am echten Handy abnehmen (H7).
 3. **Checkpoints nachholen:** M3 (eine Woche selbst benutzen) und M7 (ein echtes Jahr Chat und Git).
-4. **M8 fertig**, beginnend mit einer Messung, ob das lokale Modell Aussagen zuverlässig herauszieht.
-5. **MCP-Server** (#25) auf dem Aktionskatalog aus E16.
-6. **M9**, erst nach einer Messung, ob SQLite für die Auswertungen reicht.
-7. **M10**, dann **M6**. Der Sensor beantwortet keine der Fragen aus E14; die `no_std`-Garantie hält die CI auch so.
+4. **Rest der Härtung:** Schlüsselbund in den Apps (H5a), Adapter ohne Wörter (H6b, nach deiner Entscheidung).
+5. **M8 fertig**, beginnend mit einer Messung, ob das lokale Modell Aussagen zuverlässig herauszieht.
+6. **MCP-Server** (#25) auf dem Aktionskatalog aus E16.
+7. **M9**, erst nach einer Messung, ob SQLite für die Auswertungen reicht.
+8. **M10**, dann **M6**. Der Sensor beantwortet keine der Fragen aus E14; die `no_std`-Garantie hält die CI auch so.
 
 ## Meilensteine
 
@@ -92,13 +96,12 @@ Desktop ↔ Heimserver tauschen Ketten aus. Offline schreiben, später abgleiche
 ### M5 — Überall *(F6 · auf `main`, Abnahme offen)*
 Android-Build aus derselben Codebasis, signiertes APK im Release. iOS sobald ein Mac oder macOS-Runner bereitsteht.
 
-### H — Härtung *(E18 · als Nächstes)*
+### H — Härtung *(E18 · weitgehend umgesetzt am 2026-11-10)*
 
-Was die Entscheidungen zusagen, muss stimmen, bevor mehr Daten hereinkommen. H1 bis H3 sind mit Experimenten
-nachgewiesen, die übrigen aus dem Code gelesen. Jedes Paket ist ein Issue und ein Pull Request.
-
-**Reihenfolge:** H1 → H2 → H3 → H4 → H6 → H5 → H7. H1 und H2 teilen sich eine Regel im Kern. H3 braucht eine neue
-Form der Tabelle `ledger`, auf der H5 aufsetzt. H6 kommt vor H5, weil das Backup den Weg der Wörter mitbenutzt.
+Was die Entscheidungen zusagen, muss stimmen, bevor mehr Daten hereinkommen. H1 bis H3 waren mit Experimenten
+nachgewiesen, die übrigen aus dem Code gelesen. Jedes Paket ist ein Pull Request mit einem Test, der die Zusage
+prüft. Offen sind: der Schlüsselbund in den Apps (H5a), die Backup-Datei (H5c), Adapter ohne Wörter (H6b) und was
+bei H7 bei dir liegt.
 
 #### H1 — Löschen löscht alles *(E2, #47 · umgesetzt)*
 **War:** Der Text eines gelöschten Knotens blieb in der Kette: im Vorschlag des Assistenten (Art 28), im
@@ -178,10 +181,14 @@ eigene Kette; ein neu aufgesetzter Heimserver bekam die Ketten der Adapter nicht
   unterbrochene Umstellung), `a_new_home_server_gets_everything_back_from_one_device` in
   `apps/server/tests/sync.rs`, E2E gegen einen verschlüsselten Server.
 
-#### H7 — Release v0.4.0 und Alarme *(M1, M5, #23)*
-- Version auf 0.4.0, Tag, Release mit Installern und signiertem APK.
+#### H7 — Release v0.4.0 und Alarme *(M1, M5, #23 · vorbereitet, der Rest liegt bei dir)*
+- Version ist 0.4.0. **Offen, bei dir:** Tag `v0.4.0` setzen; vorher die drei Android-Secrets anlegen, sonst
+  erscheint der Release ohne APK.
 - Probe am echten Handy: Ziel am Handy anlegen, erscheint am PC (F6).
 - Dozzle- und Beszel-Alarm einrichten, einmal absichtlich auslösen (Checkpoint M1).
+- **Geprüft für den Betrieb:** Ein Bestand, der mit dem Stand vor der Härtung angelegt wurde (Einrichtung, Knoten,
+  Bearbeitung, Löschung, Importe, widerrufene Quelle, eigene Adapter-Kette), ist nach dem Update unverändert da;
+  der alte Import-Client gleicht weiter ab; die Umstellung auf Verschlüsselung behält alles.
 
 > **⛳ Checkpoint H:** Ein gelöschter Text steht in keiner Kette und in keiner Datei mehr, auf keinem Gerät. Ein
 > Abgleich ohne neue Rohdaten dauert bei 200 000 Belegen so lange wie bei 50 000. Die Datenbankdatei enthält keinen

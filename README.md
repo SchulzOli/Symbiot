@@ -39,6 +39,7 @@ Voraussetzungen und Einrichtung: [docs/TECH-STACK.md](docs/TECH-STACK.md#entwick
 ```bash
 cargo test --workspace
 ```
+Der Server baut SQLCipher mit OpenSSL aus den Quellen; das braucht `perl` und `make` (unter Windows baut er ohne).
 Web: Server und UI getrennt starten. Die UI leitet `/api` noch nicht weiter, deshalb nach `trunk build` die UI über den Server öffnen:
 ```bash
 cd apps/ui && trunk build
@@ -62,15 +63,18 @@ cd apps/desktop && cargo tauri dev
 - **E4 Sensibel:** Regeln für Sensibles, von der KI vorgeschlagen, von dir angenommen
 - **M4 Synchron:** fertig (v0.3.0): Personen-Schlüssel (E5), Abgleich über den Heimserver, neueste Version gewinnt mit Hinweis, Widerruf. Einrichtung: [BETRIEB.md](docs/BETRIEB.md#abgleich-m4)
 
-Seit v0.3.0 auf `main`, noch ohne Release:
-- **M5 Überall:** Android-App aus derselben Codebasis, APK baut in der CI. Offen: Release mit signiertem APK, Probe am echten Handy
+In v0.4.0 (auf `main`, Tag steht noch aus):
+- **M5 Überall:** Android-App aus derselben Codebasis, APK baut in der CI. Offen: Probe am echten Handy
 - **M7 Integration:** Rohdaten-Format, Import aus Telegram, WhatsApp, mbox und Git (Werkzeug und aus der App), Zeitleiste, Volltextsuche, Datei-Speicher, Quellen-Verwaltung. Offen: Checkpoint mit echten Daten
 - **M8 Aufbereitung:** Personen über alle Quellen, Zusammenführen als Entscheidung. Offen: Aussagen, Themen, Fragen in Worten
 - **E15 Oberfläche, E16 Assistent:** Canvas als Startansicht, barrierefrei; die KI schlägt Aktionen vor, du entscheidest
+- **H Härtung (E18):** Löschen löscht alles, „nicht exportierbar“ bleibt auf dem Gerät, der Abgleich hängt nicht mehr an
+  der Datenmenge, fremde Webseiten können nichts schreiben, die 24 Wörter verlassen den Browser nicht, der Heimserver
+  ist mit Schlüssel verschlüsselt, und jedes Gerät bringt einen neuen Heimserver zurück. Offen: Schlüsselbund in den
+  Apps, Adapter ohne Wörter (wartet auf eine Entscheidung)
 
-**Als Nächstes: Härtung (E18).** Löschen, „nicht exportierbar“, Abgleich bei vielen Daten, Verschlüsselung und Backup
-halten noch nicht, was die Entscheidungen zusagen. Bis das stimmt, kommt keine neue Datenquelle dazu. Einzelheiten:
-[PLAN.md](docs/PLAN.md#h--härtung-e18--als-nächstes).
+**Bevor du Daten anschließt:** den Heimserver verschlüsseln ([BETRIEB.md](docs/BETRIEB.md#verschlüsselung-h5-e6)).
+Was als Nächstes kommt, steht in [PLAN.md](docs/PLAN.md#reihenfolge-ab-jetzt-e18).
 
 End-to-End-Test lokal (braucht `trunk build --release` in `apps/ui`):
 ```bash

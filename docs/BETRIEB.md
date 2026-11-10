@@ -156,10 +156,10 @@ ssh heimserver 'docker inspect --format "{{.State.Health.Status}}" symbiot'
 ## Release
 
 ```bash
-git tag v0.3.0
+git tag v0.4.0
 ```
 ```bash
-git push origin v0.3.0
+git push origin v0.4.0
 ```
 Die Version im Tag muss zur Version in `Cargo.toml` passen (`[workspace.package] version`). Der Release enthält
 die Desktop-Installer und, sobald die Secrets aus Schritt 5 angelegt sind, das signierte Android-APK (arm64).
