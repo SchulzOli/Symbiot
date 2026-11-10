@@ -125,6 +125,14 @@ der Zahl der Belege. „Zeitleiste zeigen“ öffnet alles von dieser Person üb
   Themen, #32). Personen brauchen sie nicht: Regeln lassen sich jederzeit neu rechnen, und alles andere entscheidet
   der Mensch.
 
+## Aus der App importieren (#44)
+
+Unter **Quellen** → *Importieren* eine Exportdatei wählen: WhatsApp-Chat (`.txt`), Telegram (`result.json`) oder
+Mails (`mbox`). Das geht auch auf dem Handy, z. B. direkt nach „Chat exportieren“ (ohne Medien). Die Datei wird auf
+dem Gerät gelesen und als Rohdaten in dessen eigene Kette geladen; ein zweiter Import derselben Datei fügt nichts
+hinzu. Für WhatsApp gilt die Zeitzone des Geräts. Server: `POST /api/import?source=…&name=…&chat=…&utc_offset=…`
+mit der Datei als Body (bis 512 MB).
+
 ## Quellen: was genutzt wird (#44)
 
 Der Reiter **Quellen** (Taste 5) zeigt jede Quelle als Weg der Daten: Adapter → Quelle → genutzt. Eine Quelle ist
@@ -146,7 +154,9 @@ Entscheidungen vorschlagen (E16), ausgeführt werden sie erst nach Bestätigung.
 ## Noch nicht enthalten
 
 - Einzelne Belege löschen (das Entfernen eines Teils statt des ganzen Bündels). Kommt mit „Aufgeräumt“ (E13).
-- Importe aus der App starten, und pro Quelle festlegen, ob Rohdaten das Gerät verlassen dürfen (#44).
+- Pro Quelle festlegen, ob Rohdaten das Gerät verlassen dürfen (#44).
+- Import aus der App lädt keine Medien neben dem Export (Fotos eines WhatsApp-Exports); dafür weiter
+  `symbiot-import` mit dem Ordner. Git braucht den Ordner des Repositorys und geht nur über `symbiot-import`.
 - Live-Adapter (M9).
 - Dateien sind wie die Datenbank noch unverschlüsselt (E6, #22).
 - Jedes Gerät lädt beim Abgleich alle fehlenden Dateien. Eine Auswahl (z. B. Fotos nur auf dem Heimserver) fehlt.

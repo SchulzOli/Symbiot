@@ -40,6 +40,7 @@ pub enum Icon {
     Play,
     Filter,
     Calendar,
+    Upload,
 }
 
 impl Icon {
@@ -123,6 +124,9 @@ impl Icon {
             }
             Icon::Play => r#"<polygon points="6 3 20 12 6 21 6 3"/>"#,
             Icon::Filter => r#"<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>"#,
+            Icon::Upload => {
+                r#"<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/>"#
+            }
             Icon::Calendar => {
                 r#"<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>"#
             }

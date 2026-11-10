@@ -568,6 +568,59 @@ pub async fn grant_source(source: String, grant: Grant) -> ApiResult<()> {
     http_empty(gloo_net::http::Request::post("/api/sources/grant").json(&args)).await
 }
 
+/// What an import did (see `symbiot_store::Recorded`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+pub struct Recorded {
+    pub added: usize,
+    pub known: usize,
+    pub entries: usize,
+}
+
+/// #44: an export chosen in the app. The file goes as raw bytes, never through JSON.
+pub async fn import_file(
+    source: &str,
+    name: &str,
+    chat: &str,
+    utc_offset: i32,
+    bytes: js_sys::Uint8Array,
+) -> ApiResult<Recorded> {
+    let enc = |v: &str| String::from(js_sys::encode_uri_component(v));
+    if let Some(f) = tauri_invoke_fn() {
+        let headers = js_sys::Object::new();
+        for (k, v) in [
+            ("x-source", enc(source)),
+            ("x-name", enc(name)),
+            ("x-chat", enc(chat)),
+            ("x-utc-offset", utc_offset.to_string()),
+        ] {
+            js_sys::Reflect::set(&headers, &k.into(), &v.into()).map_err(js_error)?;
+        }
+        let opts = js_sys::Object::new();
+        js_sys::Reflect::set(&opts, &"headers".into(), &headers).map_err(js_error)?;
+        let promise: js_sys::Promise = f
+            .call3(&JsValue::NULL, &"import_file".into(), &bytes, &opts)
+            .map_err(js_error)?
+            .dyn_into()
+            .map_err(js_error)?;
+        let value = wasm_bindgen_futures::JsFuture::from(promise)
+            .await
+            .map_err(js_error)?;
+        return serde_wasm_bindgen::from_value(value).map_err(|e| e.to_string());
+    }
+    let url = format!(
+        "/api/import?source={}&name={}&chat={}&utc_offset={utc_offset}",
+        enc(source),
+        enc(name),
+        enc(chat)
+    );
+    http_json(
+        gloo_net::http::Request::post(&url)
+            .header("content-type", "application/octet-stream")
+            .body(JsValue::from(bytes)),
+    )
+    .await
+}
+
 /// Returns how many items lost their raw data.
 pub async fn revoke_source(source: String) -> ApiResult<usize> {
     #[derive(Serialize)]

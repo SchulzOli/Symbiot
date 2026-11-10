@@ -26,6 +26,8 @@ pub enum Error {
     Format(String),
     #[error("git: {0}")]
     Git(String),
+    #[error("{0}")]
+    Store(#[from] symbiot_store::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -119,6 +121,61 @@ impl Source {
             Source::Git => git::read(path),
         }
     }
+}
+
+impl Source {
+    /// #44: whether the source can be read from one file chosen in the app (no folder next to
+    /// it, so no media files). A Git history needs the repository folder.
+    pub fn from_one_file(self) -> bool {
+        !matches!(self, Source::Git)
+    }
+
+    /// Reads an export the app received as bytes, e.g. a file picked on the phone. `name` is the
+    /// file name (the default chat name for WhatsApp).
+    pub fn read_bytes(self, name: &str, bytes: &[u8], opts: &Options) -> Result<Import> {
+        let text = || {
+            std::str::from_utf8(bytes)
+                .map(|t| t.trim_start_matches('\u{feff}'))
+                .map_err(|_| Error::Format("Datei ist kein Text (UTF-8)".into()))
+        };
+        match self {
+            Source::Telegram => telegram::parse(text()?, None),
+            Source::WhatsApp => {
+                let chat = opts
+                    .chat
+                    .clone()
+                    .filter(|c| !c.trim().is_empty())
+                    .unwrap_or_else(|| {
+                        Path::new(name)
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| "chat".into())
+                    });
+                whatsapp::parse(text()?, &chat, opts.utc_offset_min, None)
+            }
+            Source::Mbox => mbox::parse(bytes),
+            Source::Git => Err(Error::Format(
+                "Git braucht den Ordner des Repositorys: symbiot-import git <pfad>".into(),
+            )),
+        }
+    }
+}
+
+/// Loads what an adapter read into a store: the files first, then the raw data — once the raw
+/// data is in the chain, its files should be there.
+pub fn load(store: &mut symbiot_store::Store, import: Import) -> Result<symbiot_store::Recorded> {
+    for f in &import.files {
+        let hash = match &f.data {
+            FileData::Path(p) => store.put_file_from(p).map(|(h, _)| h),
+            FileData::Bytes(b) => store.put_file(b),
+        }?;
+        if hash != f.hash {
+            return Err(Error::Format(
+                "Eine Datei hat sich während des Imports geändert".into(),
+            ));
+        }
+    }
+    Ok(store.record_evidence(import.items)?)
 }
 
 /// The MIME type for a file name, from its extension.
@@ -246,5 +303,43 @@ mod tests {
         for s in Source::ALL {
             assert_eq!(Source::parse(s.name()), Some(s));
         }
+    }
+}
+
+#[cfg(test)]
+mod bytes_tests {
+    use super::*;
+
+    #[test]
+    fn exports_from_one_file() {
+        let chat =
+            "\u{feff}12.03.24, 14:05 - Anna: Wandern am Samstag?\n12.03.24, 14:06 - Ben: Gerne\n";
+        let opts = Options {
+            utc_offset_min: 60,
+            ..Options::default()
+        };
+        let i = Source::WhatsApp
+            .read_bytes("WhatsApp Chat mit Wandergruppe.txt", chat.as_bytes(), &opts)
+            .unwrap();
+        assert_eq!(i.items.len(), 2);
+        assert!(
+            i.items[0]
+                .fields
+                .contains(&("chat".into(), "WhatsApp Chat mit Wandergruppe".into()))
+        );
+
+        let mail = "From a@example.org Mon Mar 11 09:00:00 2024\nFrom: a@example.org\nTo: b@example.org\nSubject: Hallo\nDate: Mon, 11 Mar 2024 09:00:00 +0000\nMessage-ID: <1@example.org>\n\nText\n";
+        let i = Source::Mbox
+            .read_bytes("x.mbox", mail.as_bytes(), &opts)
+            .unwrap();
+        assert_eq!(i.items.len(), 1);
+
+        assert!(Source::Git.read_bytes("x", b"", &opts).is_err());
+        assert!(!Source::Git.from_one_file());
+        assert!(
+            Source::Telegram
+                .read_bytes("r.json", b"\xff", &opts)
+                .is_err()
+        );
     }
 }

@@ -11,6 +11,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 symbiot-ai = { version = "0.3.0", path = "../../crates/symbiot-ai" }
 symbiot-core = { version = "0.3.0", path = "../../crates/symbiot-core" }
+symbiot-import = { version = "0.3.0", path = "../../crates/symbiot-import" }
 symbiot-store = { version = "0.3.0", path = "../../crates/symbiot-store" }
 symbiot-sync = { version = "0.3.0", path = "../../crates/symbiot-sync" }
 tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "net", "signal"] }
