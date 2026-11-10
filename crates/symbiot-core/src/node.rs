@@ -106,6 +106,9 @@ impl Default for Policy {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ApplyError {
     UnknownNode(NodeId),
+    /// The node was deleted (E2). Unlike an unknown node it will never appear, so an entry
+    /// about it does not wait.
+    Gone(NodeId),
     UnknownEdge(EdgeId),
     UnknownRule(RuleId),
     /// A rule needs a name and at least one keyword of three or more letters (E4).
@@ -130,6 +133,7 @@ impl fmt::Display for ApplyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ApplyError::UnknownNode(id) => write!(f, "Knoten {id} existiert nicht"),
+            ApplyError::Gone(id) => write!(f, "Knoten {id} wurde gelöscht"),
             ApplyError::UnknownEdge(id) => write!(f, "Verbindung {id} existiert nicht"),
             ApplyError::UnknownRule(id) => write!(f, "Regel {id} existiert nicht"),
             ApplyError::EmptyRule => f.write_str(
@@ -224,6 +228,10 @@ pub trait Lookup {
     fn has_edge(&self, from: &NodeId, to: &NodeId, kind: EdgeKind) -> bool;
     fn policy(&self, id: &NodeId) -> Policy;
     fn rule(&self, id: &RuleId) -> Option<Rule>;
+    /// Whether the node was deleted, and if so whether its content was removed (E2).
+    fn deleted(&self, id: &NodeId) -> Option<bool>;
+    /// Every entry that carries content about the node, see [`LedgerEntry::about`].
+    fn about(&self, id: &NodeId) -> Vec<Hash>;
 }
 
 impl Change {
@@ -231,7 +239,7 @@ impl Change {
     pub fn of(e: &LedgerEntry, view: &impl Lookup) -> Result<Change, ApplyError> {
         let op = e.op().map_err(ApplyError::Undecodable)?;
         let (author, ts_ms) = (e.head.author, e.head.ts_ms);
-        let known = |id: &NodeId| view.node(id).ok_or(ApplyError::UnknownNode(*id));
+        let known = |id: &NodeId| view.node(id).ok_or_else(|| missing(id, view));
         match &op {
             Op::CreateNode { kind, title, body } => Ok(Change::Node(Node {
                 id: NodeId::from_entry_hash(&e.hash),
@@ -282,21 +290,27 @@ impl Change {
                 }))
             }
             Op::AcceptProposal { proposal: p } => {
-                check_proposal(p, view)?;
+                let goal_there = check_proposal(p, view, e.is_pruned(), true)?;
                 let id = NodeId::from_entry_hash(&e.hash);
+                let node = Node {
+                    id,
+                    kind: p.kind,
+                    title: p.title.clone(),
+                    body: p.body.clone(),
+                    author,
+                    version: 1,
+                    created_ms: ts_ms,
+                    updated_ms: ts_ms,
+                    history: alloc::vec![e.hash],
+                    concurrent: false,
+                };
+                if !goal_there {
+                    // The goal was deleted on another device meanwhile. The step the human
+                    // accepted stays — without the connection, as when a node is deleted.
+                    return Ok(Change::Node(node));
+                }
                 Ok(Change::Accepted {
-                    node: Node {
-                        id,
-                        kind: p.kind,
-                        title: p.title.clone(),
-                        body: p.body.clone(),
-                        author,
-                        version: 1,
-                        created_ms: ts_ms,
-                        updated_ms: ts_ms,
-                        history: alloc::vec![e.hash],
-                        concurrent: false,
-                    },
+                    node,
                     edge: Edge {
                         id: EdgeId::from_entry_hash(&e.hash),
                         from: id,
@@ -309,7 +323,7 @@ impl Change {
                 })
             }
             Op::RejectProposal { proposal: p } => {
-                check_proposal(p, view)?;
+                check_proposal(p, view, e.is_pruned(), false)?;
                 Ok(Change::Rejected)
             }
             // Which devices count is decided by `Trust`, not by the graph.
@@ -349,8 +363,16 @@ impl Change {
             }
             Op::DeleteNode { node: id } => {
                 let n = known(id)?;
+                // Everything that carries the node's text goes: its versions, and suggestions
+                // and proposals that speak about it.
                 let prune = if view.policy(id).deletable {
-                    n.history
+                    let mut prune = n.history;
+                    for h in view.about(id) {
+                        if !prune.contains(&h) {
+                            prune.push(h);
+                        }
+                    }
+                    prune
                 } else {
                     Vec::new()
                 };
@@ -445,9 +467,21 @@ fn check_evidence(keys: &[Hash], items: &[Evidence], pruned: bool) -> Result<(),
     Ok(())
 }
 
-/// Same rules for accepting and rejecting: a proposal names a known goal and known sources.
-fn check_proposal(p: &Proposal, view: &impl Lookup) -> Result<(), ApplyError> {
-    if p.title.trim().is_empty() {
+/// A proposal names a known goal and known sources. Returns whether the goal is there.
+///
+/// - An entry whose content was removed (E2) has no title any more and still applies: a
+///   device that receives it that way must see the node come and go like every other device,
+///   or it would never learn that the node was deleted.
+/// - `accepted`: a goal or source that was deleted meanwhile (on another device) does not
+///   undo what the human accepted. Otherwise the new node would vanish without ever having
+///   been deleted — and could not be deleted, with its text left in the chain.
+fn check_proposal(
+    p: &Proposal,
+    view: &impl Lookup,
+    pruned: bool,
+    accepted: bool,
+) -> Result<bool, ApplyError> {
+    if !pruned && p.title.trim().is_empty() {
         return Err(ApplyError::EmptyTitle);
     }
     if p.sources.is_empty() {
@@ -455,10 +489,21 @@ fn check_proposal(p: &Proposal, view: &impl Lookup) -> Result<(), ApplyError> {
     }
     for id in core::iter::once(&p.goal).chain(&p.sources) {
         if view.node(id).is_none() {
-            return Err(ApplyError::UnknownNode(*id));
+            match missing(id, view) {
+                ApplyError::Gone(_) if accepted => {}
+                other => return Err(other),
+            }
         }
     }
-    Ok(())
+    Ok(view.node(&p.goal).is_some())
+}
+
+/// Why a node is not there: deleted for good, or not known (yet).
+fn missing(id: &NodeId, view: &impl Lookup) -> ApplyError {
+    match view.deleted(id) {
+        Some(_) => ApplyError::Gone(*id),
+        None => ApplyError::UnknownNode(*id),
+    }
 }
 
 /// The projection built from several chains, see [`replay`].
@@ -478,6 +523,8 @@ pub struct Replay {
 /// - An entry whose node or edge is not known yet (written on another device whose clock is
 ///   behind) waits until something else changes, then is tried again.
 /// - Only when every remaining entry waits, the earliest one is given up (`skipped`).
+/// - An entry about a deleted node does not wait: it is skipped at once, and if the node's
+///   content was removed, so is this entry's (`prune`) — however late it arrives (E2).
 ///
 /// `accepts` decides which entries count at all (see [`crate::Trust::accepts`]).
 pub fn replay(chains: &[&[LedgerEntry]], accepts: impl Fn(&PubKey, u64) -> bool) -> Replay {
@@ -496,7 +543,11 @@ pub fn replay(chains: &[&[LedgerEntry]], accepts: impl Fn(&PubKey, u64) -> bool)
         let Some(c) = earliest(&next, &waiting, true) else {
             match earliest(&next, &waiting, false) {
                 Some(c) => {
-                    out.skipped.push(chains[c][next[c]].hash);
+                    let e = &chains[c][next[c]];
+                    out.skipped.push(e.hash);
+                    if out.state.speaks_of_removed(e) {
+                        out.prune.push(e.hash);
+                    }
                     next[c] += 1;
                     waiting.fill(false);
                     continue;
@@ -514,12 +565,18 @@ pub fn replay(chains: &[&[LedgerEntry]], accepts: impl Fn(&PubKey, u64) -> bool)
                 if let Change::Deleted { prune, .. } = change {
                     out.prune.extend(prune);
                 }
+                if out.state.speaks_of_removed(e) {
+                    out.prune.push(e.hash);
+                }
                 next[c] += 1;
                 waiting.fill(false);
             }
             Err(ApplyError::UnknownNode(_) | ApplyError::UnknownEdge(_)) => waiting[c] = true,
             Err(_) => {
                 out.skipped.push(e.hash);
+                if out.state.speaks_of_removed(e) {
+                    out.prune.push(e.hash);
+                }
                 next[c] += 1;
             }
         }
@@ -547,6 +604,11 @@ pub struct State {
     /// #44: decisions about sources (entry, time, source, grant or `None` = revoked), in the
     /// order they apply.
     pub sources: Vec<(Hash, u64, String, Option<Grant>)>,
+    /// Deleted nodes (E2), and whether their content was removed. They stay known for good,
+    /// so an entry about them that turns up later is treated the same way.
+    pub deleted: BTreeMap<NodeId, bool>,
+    /// For every node the entries that carry content about it, see [`LedgerEntry::about`].
+    pub about: BTreeMap<NodeId, BTreeSet<Hash>>,
 }
 
 impl Lookup for State {
@@ -571,9 +633,26 @@ impl Lookup for State {
     fn rule(&self, id: &RuleId) -> Option<Rule> {
         self.rules.get(id).cloned()
     }
+
+    fn deleted(&self, id: &NodeId) -> Option<bool> {
+        self.deleted.get(id).copied()
+    }
+
+    fn about(&self, id: &NodeId) -> Vec<Hash> {
+        self.about
+            .get(id)
+            .map(|entries| entries.iter().copied().collect())
+            .unwrap_or_default()
+    }
 }
 
 impl State {
+    /// Whether `e` carries content about a node that was deleted with its content (E2). Such
+    /// an entry loses its content too, whether it applies or not.
+    pub fn speaks_of_removed(&self, e: &LedgerEntry) -> bool {
+        e.about().iter().any(|n| self.deleted.get(n) == Some(&true))
+    }
+
     fn refresh_sensitive(&mut self, id: &NodeId) {
         let Some(node) = self.nodes.get(id) else {
             return;
@@ -593,6 +672,10 @@ impl State {
     }
 
     pub fn apply(&mut self, e: &LedgerEntry) -> Result<Change, ApplyError> {
+        // Remembered whether the entry applies or not: its content is there either way.
+        for node in e.about() {
+            self.about.entry(node).or_default().insert(e.hash);
+        }
         let change = Change::of(e, self)?;
         match &change {
             Change::Node(n) => {
@@ -635,12 +718,20 @@ impl State {
                 self.rules.remove(id);
                 self.refresh_all_sensitive();
             }
-            Change::Deleted { node, .. } => {
+            Change::Deleted { node, prune } => {
                 self.nodes.remove(node);
                 self.edges.retain(|_, x| x.from != *node && x.to != *node);
                 self.sensitive.remove(node);
-                self.policies.remove(node);
                 self.by_hand.remove(node);
+                // A deletable node always has content to remove (its first version).
+                let removed = !prune.is_empty();
+                self.deleted.insert(*node, removed);
+                self.about.remove(node);
+                // What stays in the chain keeps its policy: „not exportable“ still holds for
+                // the content of a node that was only hidden (E3).
+                if removed {
+                    self.policies.remove(node);
+                }
             }
             Change::Unlinked(edge) => {
                 self.edges.remove(edge);
@@ -977,12 +1068,14 @@ mod tests {
                     base: None,
                 }
             ),
-            Err(ApplyError::UnknownNode(a.id))
+            Err(ApplyError::Gone(a.id))
         );
         assert_eq!(
             push(&mut st, Op::DeleteNode { node: a.id }),
-            Err(ApplyError::UnknownNode(a.id))
+            Err(ApplyError::Gone(a.id))
         );
+        // The tombstone stays: deleted with its content.
+        assert_eq!(st.deleted.get(&a.id), Some(&true));
     }
 
     #[test]
@@ -1131,7 +1224,10 @@ mod tests {
         assert!(reference.state.edges.is_empty());
         assert_eq!(reference.skipped.len(), 2);
         assert!(reference.skipped.contains(&c1.hash));
-        assert_eq!(reference.prune, alloc::vec![chains[1][0].hash]);
+        // B's only version loses its content — and so does the edit that came after the
+        // deletion: it is skipped, but its text must not stay in the chain (E2).
+        assert_eq!(reference.prune, alloc::vec![chains[1][0].hash, c1.hash]);
+        assert_eq!(reference.state.deleted.get(&b), Some(&true));
     }
 
     #[test]

@@ -17,4 +17,5 @@ symbiot-core = { version = "0.3.0", path = "../symbiot-core" }
 thiserror = "2.0.21"
 
 [dev-dependencies]
+proptest = "1.12.0"
 tempfile = "3.27.0"

@@ -101,6 +101,7 @@ impl Store {
             .check()
             .map_err(|e| Error::Suggestion(e.to_string()))?;
         let mut out = Outcome::default();
+        let before = self.tip(&self.device())?.map(|t| t.seq);
         if accept {
             if chosen.is_empty() {
                 return Err(Error::Suggestion("Keine Aktion ausgewählt".into()));
@@ -142,10 +143,14 @@ impl Store {
             }
         }
         let accepted = accept && !out.executed.is_empty();
+        // H1: the decision names the entries its actions wrote. That ties the suggestion's
+        // text to the nodes it created — deleted with them (E2), kept at home with them (E3).
+        let executed = self.own_hashes_after(before)?;
         self.append(Op::DecideSuggestion {
             accepted,
             chosen: out.executed.iter().map(|e| e.index as u32).collect(),
             suggestion,
+            executed,
         })?;
         Ok(out)
     }
@@ -212,6 +217,7 @@ mod tests {
             accepted,
             chosen,
             suggestion,
+            executed,
         }) = last.op()
         else {
             panic!("the decision comes last");
@@ -219,6 +225,10 @@ mod tests {
         assert!(accepted);
         assert_eq!(chosen, [0, 1]);
         assert_eq!(suggestion.model, "mock");
+        // H1: the decision names the two entries its actions wrote; the first made the node.
+        assert_eq!(executed.len(), 2);
+        assert_eq!(NodeId::from_entry_hash(&executed[0]), shoes);
+        assert!(last.about().contains(&shoes) && last.about().contains(&goal.id));
         assert!(s.verify().unwrap().ok);
     }
 

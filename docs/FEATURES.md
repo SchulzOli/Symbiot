@@ -26,10 +26,11 @@ Nichts wird heimlich verändert.
 - **Fertig, wenn:** Nach dem Löschen steht der Text nicht mehr in der Datenbankdatei und „Kette prüfen“ ist ok.
   ✅ `crates/symbiot-store` (`deleting_removes_the_content_from_the_file`), `apps/server/tests/api.rs`,
   `e2e/tests/verknuepfen.spec.ts`.
-- **Bekannte Lücken (2026-11-10, PLAN H1 und H2):** Der Test deckt nur Knoten ab, die von Hand entstanden. Der Text
-  bleibt in der Kette, wenn er auch in einem Vorschlag des Assistenten (Art 28) oder einem abgelehnten Vorschlag
-  (Art 5) steht, und wenn ein anderes Gerät den Knoten nach dem Löschen noch bearbeitet hat. Ein nicht exportierbarer
-  Knoten, der über den Assistenten entstand, verlässt das Gerät mit dem Vorschlag.
+- **H1, H2 (2026-11-10):** Dasselbe gilt für jeden Weg, auf dem ein Knoten entsteht oder sich ändert: von Hand,
+  als angenommener oder abgelehnter Vorschlag, über den Assistenten, und für Bearbeitungen, die ein anderes Gerät
+  nach dem Löschen schrieb. Gelöschte Knoten bleiben als Grabstein bekannt; was später über sie ankommt, verliert
+  seinen Inhalt sofort. Was über einen nicht exportierbaren Knoten spricht, verlässt das Gerät nicht.
+  ✅ `crates/symbiot-store/tests/zusagen.rs` (Property-Test über drei Geräte und beliebige Reihenfolgen).
 
 ## F3 — Verknüpfen *(M2)*
 Zusammenhänge sichtbar machen.

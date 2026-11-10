@@ -4498,6 +4498,7 @@ dependencies = [
  "bip39",
  "getrandom 0.4.3",
  "postcard",
+ "proptest",
  "rusqlite",
  "serde",
  "serde_json",
