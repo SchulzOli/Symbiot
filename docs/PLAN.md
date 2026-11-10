@@ -94,23 +94,151 @@ Android-Build aus derselben Codebasis, signiertes APK im Release. iOS sobald ein
 
 ### H — Härtung *(E18 · als Nächstes)*
 
-Was die Entscheidungen zusagen, muss stimmen, bevor mehr Daten hereinkommen. Die ersten drei Punkte sind mit
-Experimenten nachgewiesen, die übrigen aus dem Code gelesen.
+Was die Entscheidungen zusagen, muss stimmen, bevor mehr Daten hereinkommen. H1 bis H3 sind mit Experimenten
+nachgewiesen, die übrigen aus dem Code gelesen. Jedes Paket ist ein Issue und ein Pull Request.
 
-| Nr. | Paket | Zusage | Heute |
-|---|---|---|---|
-| H1 | Löschen löscht alles | E2 | Der Text eines gelöschten Knotens bleibt in der Kette: im Vorschlag des Assistenten (Art 28), im abgelehnten Vorschlag (Art 5) und in einer Bearbeitung, die ein anderes Gerät nach dem Löschen schrieb (Art 2). |
-| H2 | „Nicht exportierbar“ bleibt da | E3 | Entstand der Knoten über den Assistenten, geht sein Text mit dem Vorschlag (Art 28) an die anderen Geräte. |
-| H3 | Abgleich hängt nicht an der Datenmenge | E14 | Jeder Empfang prüft die ganze Kette von vorn, lädt alle Ketten samt Rohdaten in den Arbeitsspeicher und baut die Projektion neu. Ein einzelner neuer Eintrag kostet 0,2 s bei 50 000 Nachrichten und 0,5 s bei 200 000. |
-| H4 | Web-API nimmt nichts von fremden Seiten | E12 | `POST /api/import` prüft keine Herkunft. Eine fremde Webseite im Browser eines Tailnet-Geräts kann Rohdaten in die Kette des Heimservers schreiben, wenn sie die Adresse kennt. |
-| H5 | Verschlüsselt, mit Backup und Weg zurück | E5, E6 | Datenbank, Dateien und Geräteschlüssel liegen im Klartext (#22). Ein älteres Backup des Heimservers zurückzuspielen und weiterzuschreiben macht dessen Kette für alle Geräte unbrauchbar. |
-| H6 | Die 24 Wörter bleiben selten | E5, E7 | Jeder Import-Adapter braucht die Wörter, und die Web-Oberfläche schickt sie an den Heimserver. Der Import aus der App schreibt in die Kette des Menschen-Geräts statt in eine eigene Adapter-Kette. |
-| H7 | Release v0.4.0 und Alarme | M1, M5 | Kein Release seit v0.3.0, also kein APK. Die Alarme aus dem Checkpoint M1 fehlen. |
+**Reihenfolge:** H1 → H2 → H3 → H4 → H6 → H5 → H7. H1 und H2 teilen sich eine Regel im Kern. H3 braucht eine neue
+Form der Tabelle `ledger`, auf der H5 aufsetzt. H6 kommt vor H5, weil das Backup den Weg der Wörter mitbenutzt.
+
+#### H1 — Löschen löscht alles *(E2, #47)*
+**Heute:** Der Text eines gelöschten Knotens bleibt in der Kette: im Vorschlag des Assistenten (Art 28), im
+abgelehnten Vorschlag (Art 5) und in einer Bearbeitung, die ein anderes Gerät nach dem Löschen schrieb (Art 2).
+- Der Kern bekommt eine Regel „dieser Eintrag trägt Inhalt über diese Knoten“. Sie gilt für alle Arten mit Inhalt.
+- Gelöschte Knoten bleiben als **Grabstein** bekannt. Ein Eintrag über einen gelöschten Knoten, der später ankommt
+  oder später einsortiert wird, verliert seinen Inhalt sofort, statt übersprungen liegen zu bleiben.
+- `DecideSuggestion` nennt im Kopf die Einträge, die es ausgeführt hat. So steht fest, welche Knoten ein Vorschlag
+  angelegt hat. Einträge im alten Format bleiben lesbar.
+- **Fertig, wenn:** Ein Property-Test über mehrere Geräte und Reihenfolgen zeigt, dass nach dem Löschen kein
+  Eintrag auf keinem Gerät den Text noch enthält, egal wie der Knoten entstand. Der Test auf die Datenbankdatei
+  deckt auch den Weg über den Assistenten ab.
+
+#### H2 — „Nicht exportierbar“ bleibt auf dem Gerät *(E3, #47)*
+**Heute:** Entstand der Knoten über den Assistenten, geht sein Text mit dem Vorschlag (Art 28) an die anderen Geräte.
+- Der Abgleich benutzt dieselbe Regel wie H1: Inhalt jedes Eintrags, der über einen nicht exportierbaren Knoten
+  spricht, bleibt zu Hause.
+- Dieselbe Prüfung gilt für den Kontext einer externen KI.
+- **Fertig, wenn:** Der Text eines nicht exportierbaren Knotens steht in keinem Eintrag, den ein Gerät herausgibt
+  (Test über alle Wege: von Hand, Vorschlag, Assistent).
+
+#### H3 — Abgleich hängt nicht an der Datenmenge *(E14, #48)*
+**Heute:** Jeder Empfang prüft die ganze Kette von vorn, lädt alle Ketten samt Rohdaten in den Arbeitsspeicher und
+baut die Projektion neu. Ein einzelner neuer Eintrag kostet 0,2 s bei 50 000 Nachrichten und 0,5 s bei 200 000.
+- Neue Einträge werden nur gegen die bekannte Spitze der Kette geprüft. „Kette prüfen“ bleibt die volle Prüfung.
+- `ledger` bekommt Spalten für Art und Zeit. Neuaufbau und Vertrauen lesen nur Einträge des Graphen
+  und nie den Inhalt von Rohdaten-Bündeln.
+- Ketten werden in Seiten geholt, wie sie schon in Seiten gesendet werden.
+- Der Server erledigt Speicherarbeit außerhalb der async-Threads, damit `/health` während eines Imports antwortet.
+- **Fertig, wenn:** Ein Test zeigt, dass der Empfang eines Eintrags bei 200 000 Belegen nicht merklich länger
+  dauert als bei 50 000. Schrittweises Anwenden und voller Neuaufbau liefern dieselbe Projektion.
+
+#### H4 — Web-API nimmt nichts von fremden Seiten *(E12, #49)*
+**Heute:** `POST /api/import` prüft keine Herkunft. Eine fremde Webseite im Browser eines Tailnet-Geräts kann
+Rohdaten in die Kette des Heimservers schreiben, wenn sie die Adresse kennt.
+- Jede schreibende Route unter `/api` außer dem signierten Abgleich verlangt eine Anfrage derselben Herkunft:
+  eigener Header der Oberfläche, dazu `Sec-Fetch-Site` und `Origin`, wo der Browser sie schickt.
+- Die Web-Version bekommt dieselbe Content-Security-Policy wie die Desktop-App.
+- **Fertig, wenn:** Schreibende Anfragen ohne den Header oder von fremder Herkunft werden abgelehnt (API-Test), die
+  Oberfläche läuft unverändert (E2E).
+
+#### H6 — Die 24 Wörter bleiben selten *(E5, E7, #50)*
+**Heute:** Die Web-Oberfläche schickt die Wörter an den Heimserver. Jeder Import-Adapter braucht sie einmal. Der
+Import aus der App schreibt in die Kette des Menschen-Geräts.
+- **H6a:** Signiert wird dort, wo die Wörter eingegeben werden, im Browser bzw. in der App. Der Heimserver bekommt
+  nur die fertige Bestätigung oder den fertigen Widerruf.
+- **H6b (Vorschlag, braucht deine Entscheidung):** Ein bestätigtes Gerät darf Adapter bestätigen und widerrufen.
+  Dann braucht kein Adapter die Wörter, und die App kann pro Quelle einen eigenen Adapter-Schlüssel führen. Bis
+  dahin bleibt der Import aus der App in der Kette des Geräts, und E7 nennt das als Ausnahme.
+- **Fertig, wenn:** Die Wörter stehen in keiner Anfrage an den Heimserver (API-Test, E2E).
+
+#### H5 — Verschlüsselt, mit Backup und Weg zurück *(E5, E6, #22)*
+**Heute:** Datenbank, Dateien und Geräteschlüssel liegen im Klartext. Ein älteres Backup des Heimservers
+zurückzuspielen und weiterzuschreiben macht dessen Kette für alle Geräte unbrauchbar. Geräte senden nur ihre eigene
+Kette; ein neu aufgesetzter Heimserver bekäme die Ketten der Adapter nicht zurück.
+- **H5a Speicher:** SQLCipher für die Datenbank (E6), Dateien einzeln verschlüsselt. Der Schlüssel liegt im
+  Schlüsselbund des Betriebssystems, auf dem Heimserver als Secret. Zuerst ein Versuch, ob SQLCipher auf allen fünf
+  Zielen baut (Windows, macOS, Linux, Android, Server-Image); sonst der Ausweg aus E6.
+- **H5b Weg zurück:** Geräte senden dem Heimserver jede Kette, die ihm fehlt, nicht nur die eigene. Damit ist jedes
+  Gerät eine vollständige Kopie. Ein Heimserver mit neuem Schlüssel wird bestätigt und holt alles wieder; der alte
+  Schlüssel wird widerrufen. Dasselbe gilt für ein Gerät, dessen Kette sich verzweigt hat.
+- **H5c Backup:** alle Ketten und Dateien in einer Datei, verschlüsselt mit einem Schlüssel aus den 24 Wörtern.
+  Nicht exportierbare Knoten sind nicht dabei (E5).
+- **Fertig, wenn:** Die Datenbankdatei enthält keinen lesbaren Text. Ohne Schlüssel startet die App nicht. Ein
+  Heimserver mit leerem Datenordner hat nach Bestätigen und einem Abgleich alle Ketten und Dateien wieder.
+
+#### H7 — Release v0.4.0 und Alarme *(M1, M5, #23)*
+- Version auf 0.4.0, Tag, Release mit Installern und signiertem APK.
+- Probe am echten Handy: Ziel am Handy anlegen, erscheint am PC (F6).
+- Dozzle- und Beszel-Alarm einrichten, einmal absichtlich auslösen (Checkpoint M1).
 
 > **⛳ Checkpoint H:** Ein gelöschter Text steht in keiner Kette und in keiner Datei mehr, auf keinem Gerät. Ein
 > Abgleich ohne neue Rohdaten dauert bei 200 000 Belegen so lange wie bei 50 000. Die Datenbankdatei enthält keinen
 > lesbaren Text. Der Heimserver lässt sich mit neuem Schlüssel neu aufsetzen, und nach einem Abgleich ist alles
 > wieder da.
+
+#### Was nur du tun kannst
+| Was | Wofür | Wo beschrieben |
+|---|---|---|
+| Android-Signaturschlüssel erzeugen, drei Secrets anlegen | APK im Release (H7) | [BETRIEB.md](BETRIEB.md#einmalig-einrichten-von-hand-braucht-deine-anmeldungen), Schritt 5 |
+| Tag `v0.4.0` setzen | Release (H7) | [BETRIEB.md](BETRIEB.md#release) |
+| Dozzle- und Beszel-Alarm einrichten | Checkpoint M1 (H7) | BETRIEB.md, Schritte 3 und 4 |
+| Entscheiden: dürfen Geräte Adapter bestätigen? | H6b | E5, E7 |
+| Schlüssel für die Datenbank des Heimservers als Secret hinterlegen | H5a | folgt mit H5 in BETRIEB.md |
+
+### Zusagen und ihre Tests
+
+Jede Zusage aus den Entscheidungen bekommt einen Test, der sie über alle Wege prüft. „Offen“ heißt: Der Test fehlt
+oder deckt einen Weg nicht ab.
+
+| Zusage | Entscheidung | Test | Stand |
+|---|---|---|---|
+| Jede Veränderung der Kette wird erkannt | F2 | `any_tampering_is_detected` (Kern) | hält |
+| Gelöscht ist gelöscht, auf jedem Gerät | E2 | `deleting_removes_the_content_from_the_file` (Store) | offen: Assistent, Vorschlag, späte Bearbeitung (H1) |
+| Nicht exportierbar verlässt das Gerät nie | E3 | `apps/server/tests/sync.rs` | offen: Weg über den Assistenten (H2) |
+| Sensibles erreicht kein externes Modell | E4 | `crates/symbiot-ai`, `apps/server/tests/api.rs` | hält für Knoten |
+| Nur Geräte der Person gleichen ab, Widerruf gilt | E5 | `apps/server/tests/sync.rs` | hält |
+| Die Wörter werden nie gespeichert und selten benutzt | E5 | – | offen (H6) |
+| Der Speicher ist verschlüsselt | E6 | – | offen (H5) |
+| Texte von außen sind Daten, nie Auftrag | E12 | – | offen, wird mit M8 Pflicht |
+| Kein Vorschlag ändert Daten ohne Klick | F4, E16 | `api.rs`, `assistent.spec.ts` | hält |
+| Ein zweiter Import ändert nichts | E14 | `crates/symbiot-import/tests/cli.rs` | hält |
+| Abgleich hängt nicht an der Datenmenge | E14 | – | offen (H3) |
+
+### Danach, in dieser Reihenfolge
+
+#### K — Checkpoints nachholen
+- **K1 (M3, #20):** eine Woche selbst benutzen. Jeden Stolperstein als Issue.
+- **K2 (M7):** ein echtes Jahr Chat und Git importieren. Abnahme wie im Checkpoint M7, dazu die Dauer eines
+  Abgleichs auf Handy und Desktop notieren.
+
+#### M8 — Aufbereitung fertig *(#32)*
+1. **Messung zuerst.** Etwa 200 echte Nachrichten, von Hand markiert (Person · Thema · Haltung · Zitat). Die Daten
+   bleiben im Datenordner und kommen nie ins Repository. Ein kleines Werkzeug lässt Modelle dagegen laufen und
+   zählt richtige und falsche Aussagen. Jedes Zitat muss wörtlich im Beleg stehen. Ergebnis: welches Modell, lokal
+   oder gemischt. Das beantwortet die offene Frage aus E14.
+2. **KI-Anbindung erneuern.** Strukturierte Ausgabe über LiteLLM (JSON-Schema) statt Suchen nach `{…}` im Text.
+   Modell pro Aufgabe einstellbar. Der Sonderfall für `qwen3` wird eine Einstellung.
+3. **E12 umsetzen.** Texte von außen stehen im Prompt als gekennzeichnete Daten. Jede Aussage wird gegen ihren
+   Beleg geprüft. Testdaten mit eingebetteten Anweisungen gehören in die Tests.
+4. **Aufbereiter als Gerät** (E14): eigener Schlüssel, eigene Kette, Herkunft an jedem Ergebnis, neue Version
+   ersetzt alte per Eintrag.
+5. **Aussagen und Themen**, dann **Fragen in Worten** mit Quellen, deren Zitate Symbiot prüft.
+
+#### E16 fertig und MCP *(#25)*
+- Der Assistent bekommt, was seine Aktionen brauchen: Personen und Quellen im Kontext, oder die Aktionen
+  verschwinden aus seinem Katalog.
+- Vorschläge von außen landen in einem Eingang und warten auf die Entscheidung des Menschen.
+- MCP-Server: lesen (Knoten, Suche in Rohdaten) und vorschlagen (derselbe Katalog). Nie ausführen.
+
+#### M9 — Zeit
+1. **Messung zuerst.** Fünf Millionen künstliche Belege in SQLite: Zeitleiste, Suche und „Zeit pro Kategorie und
+   Woche“. Nur wenn das zu langsam ist, kommen Parquet und DuckDB dazu.
+2. Erster Live-Adapter: Web-Verlauf (liest eine lokale Datei, braucht keine API).
+3. Kategorien als Regeln wie in E4, Ansicht „Wie verbringe ich meine Zeit“.
+
+#### E13 — Checkpoints, Zeugen, Aufräumen *(#21)*
+Nach H3 braucht es Checkpoints nur noch für den schnellen Start neuer Geräte. Zeugen schützen vor einer gekürzten
+oder neu geschriebenen Kette eines gestohlenen Geräts. Einzelne Teile eines Eintrags entfernen (ein Beleg aus einem
+Bündel, eine Aktion aus einem Vorschlag) gehört hierher.
 
 ### M6 — Sensor *(F7 · zurückgestellt bis nach M10)*
 ESP32-C3 mit `symbiot-core` signiert einen Beleg (z. B. Raumklima oder Schritte) und schickt ihn an den Heimserver.
