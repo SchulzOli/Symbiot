@@ -5,7 +5,13 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+# E6: the database file is encrypted with SQLCipher (AES-256). Building it compiles OpenSSL from
+# source, which needs perl and make. Switched on by the server; the apps follow with H5.
+encryption = ["rusqlite/bundled-sqlcipher-vendored-openssl"]
+
 [dependencies]
+chacha20poly1305 = "0.10.1"
 getrandom = "0.4.3"
 postcard = { version = "1.1.3", default-features = false, features = ["alloc"] }
 rusqlite = { version = "0.41.1", features = ["bundled"] }

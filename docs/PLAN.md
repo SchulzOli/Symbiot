@@ -157,20 +157,26 @@ braucht sie einmal. Der Import aus der App schreibt in die Kette des Menschen-Ge
 - **Abgenommen durch:** `e2e/tests/geraete.spec.ts` (keine Anfrage enthält eines der 24 Wörter),
   `person_key_signs_in_the_browser_and_the_words_stay_there` (API), `signed_elsewhere_is_checked_here` (Store).
 
-#### H5 — Verschlüsselt, mit Backup und Weg zurück *(E5, E6, #22)*
-**Heute:** Datenbank, Dateien und Geräteschlüssel liegen im Klartext. Ein älteres Backup des Heimservers
-zurückzuspielen und weiterzuschreiben macht dessen Kette für alle Geräte unbrauchbar. Geräte senden nur ihre eigene
-Kette; ein neu aufgesetzter Heimserver bekäme die Ketten der Adapter nicht zurück.
-- **H5a Speicher:** SQLCipher für die Datenbank (E6), Dateien einzeln verschlüsselt. Der Schlüssel liegt im
-  Schlüsselbund des Betriebssystems, auf dem Heimserver als Secret. Zuerst ein Versuch, ob SQLCipher auf allen fünf
-  Zielen baut (Windows, macOS, Linux, Android, Server-Image); sonst der Ausweg aus E6.
-- **H5b Weg zurück:** Geräte senden dem Heimserver jede Kette, die ihm fehlt, nicht nur die eigene. Damit ist jedes
-  Gerät eine vollständige Kopie. Ein Heimserver mit neuem Schlüssel wird bestätigt und holt alles wieder; der alte
-  Schlüssel wird widerrufen. Dasselbe gilt für ein Gerät, dessen Kette sich verzweigt hat.
-- **H5c Backup:** alle Ketten und Dateien in einer Datei, verschlüsselt mit einem Schlüssel aus den 24 Wörtern.
-  Nicht exportierbare Knoten sind nicht dabei (E5).
-- **Fertig, wenn:** Die Datenbankdatei enthält keinen lesbaren Text. Ohne Schlüssel startet die App nicht. Ein
-  Heimserver mit leerem Datenordner hat nach Bestätigen und einem Abgleich alle Ketten und Dateien wieder.
+#### H5 — Verschlüsselt, mit Weg zurück *(E5, E6, #22 · auf dem Heimserver umgesetzt, Apps offen)*
+**War:** Datenbank, Dateien und Geräteschlüssel lagen im Klartext. Ein älteres Backup des Heimservers
+zurückzuspielen und weiterzuschreiben machte dessen Kette für alle Geräte unbrauchbar. Geräte sendeten nur ihre
+eigene Kette; ein neu aufgesetzter Heimserver bekam die Ketten der Adapter nicht zurück.
+- **H5a Speicher (Heimserver umgesetzt):** Mit `SYMBIOT_DB_KEY` verschlüsselt SQLCipher die Datenbank, die Dateien
+  sind einzeln versiegelt (XChaCha20-Poly1305), der Geräteschlüssel liegt in der Datenbank. Ein unverschlüsselter
+  Bestand wird beim ersten Start mit Schlüssel umgestellt: Nur die Ketten werden kopiert, alles andere daraus neu
+  gebaut, die alte Datei überschrieben und entfernt. Ohne Schlüssel startet eine verschlüsselte Datenbank nicht.
+  Einrichten: [BETRIEB.md](BETRIEB.md#verschlüsselung-h5-e6).
+- **H5a Apps (offen):** Desktop und Android bauen ohne SQLCipher, damit die Installer nicht an OpenSSL hängen. Es
+  fehlt der Schlüsselbund des Betriebssystems als Ablage. Bis dahin schützt dort die Verschlüsselung des
+  Betriebssystems.
+- **H5b Weg zurück (umgesetzt):** Geräte senden dem Heimserver jede Kette, die ihm fehlt, nicht nur die eigene.
+  Damit ist jedes Gerät eine vollständige Kopie. Ein Heimserver mit neuem Schlüssel wird bestätigt und bekommt von
+  einem einzigen Gerät alles wieder. Ablauf: [BETRIEB.md](BETRIEB.md#heimserver-verloren-oder-neu-aufsetzen-h5).
+- **H5c Backup-Datei (offen, nachrangig):** alle Ketten und Dateien in einer Datei, verschlüsselt mit einem
+  Schlüssel aus den 24 Wörtern. Seit H5b ist jedes Gerät schon eine Kopie; die Datei wäre eine zusätzliche.
+- **Abgenommen durch:** `crates/symbiot-store/tests/verschluesselt.rs` (kein Klartext im Datenordner, Umstellung,
+  unterbrochene Umstellung), `a_new_home_server_gets_everything_back_from_one_device` in
+  `apps/server/tests/sync.rs`, E2E gegen einen verschlüsselten Server.
 
 #### H7 — Release v0.4.0 und Alarme *(M1, M5, #23)*
 - Version auf 0.4.0, Tag, Release mit Installern und signiertem APK.
@@ -189,7 +195,7 @@ Kette; ein neu aufgesetzter Heimserver bekäme die Ketten der Adapter nicht zur�
 | Tag `v0.4.0` setzen | Release (H7) | [BETRIEB.md](BETRIEB.md#release) |
 | Dozzle- und Beszel-Alarm einrichten | Checkpoint M1 (H7) | BETRIEB.md, Schritte 3 und 4 |
 | Entscheiden: dürfen Geräte Adapter bestätigen? | H6b | E5, E7 |
-| Schlüssel für die Datenbank des Heimservers als Secret hinterlegen | H5a | folgt mit H5 in BETRIEB.md |
+| Schlüssel für die Datenbank des Heimservers erzeugen und in `.env` eintragen | H5a | [BETRIEB.md](BETRIEB.md#verschlüsselung-h5-e6) |
 
 ### Zusagen und ihre Tests
 
@@ -204,7 +210,8 @@ oder deckt einen Weg nicht ab.
 | Sensibles erreicht kein externes Modell | E4 | `crates/symbiot-ai`, `apps/server/tests/api.rs` | hält für Knoten |
 | Nur Geräte der Person gleichen ab, Widerruf gilt | E5 | `apps/server/tests/sync.rs` | hält |
 | Die Wörter verlassen das Gerät nicht, an dem sie getippt werden | E5 | `e2e/tests/geraete.spec.ts`, `apps/server/tests/api.rs` | hält (H6a); Adapter brauchen sie noch (H6b) |
-| Der Speicher ist verschlüsselt | E6 | – | offen (H5) |
+| Der Speicher ist verschlüsselt | E6 | `crates/symbiot-store/tests/verschluesselt.rs` | hält auf dem Heimserver mit Schlüssel (H5a); Apps offen |
+| Ein verlorener Heimserver kostet keine Daten | E5 | `apps/server/tests/sync.rs` | hält (H5b) |
 | Texte von außen sind Daten, nie Auftrag | E12 | – | offen, wird mit M8 Pflicht |
 | Fremde Webseiten können nichts schreiben | E12 | `apps/server/tests/api.rs` | hält (H4) |
 | Kein Vorschlag ändert Daten ohne Klick | F4, E16 | `api.rs`, `assistent.spec.ts` | hält |

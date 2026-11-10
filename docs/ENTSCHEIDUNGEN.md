@@ -124,10 +124,10 @@ einen Gerät. Geht das Gerät verloren, ist er weg. Beim Setzen des Schalters er
 - Seit H6a (2026-11-10) entstehen die Wörter im Browser und werden dort zur Signatur; der Heimserver sieht sie nie.
   Offen bleibt: Jeder Import-Adapter braucht sie einmal (`SYMBIOT_WORDS`, auf dem Rechner des Werkzeugs). Vorschlag
   H6b: Ein bestätigtes Gerät bestätigt Adapter.
-- BETRIEB.md empfiehlt, `device.key` des Heimservers zu sichern. Wer ein älteres Backup zurückspielt und
-  weiterschreibt, erzeugt eine zweite Geschichte derselben Kette; die Geräte lehnen sie dauerhaft ab. Der Weg
-  „neuer Geräteschlüssel, bestätigen, alles wieder holen“ fehlt noch: Geräte senden heute nur ihre eigene Kette,
-  ein neu aufgesetzter Heimserver bekäme die Ketten der Adapter und seine alte Kette nicht zurück.
+- Seit H5b (2026-11-10) senden Geräte dem Heimserver jede Kette, die ihm fehlt. Ein Heimserver mit neuem
+  Geräteschlüssel bekommt von einem einzigen Gerät alles wieder; ein Backup von `device.key` braucht es nicht mehr.
+  Ein altes Backup zurückzuspielen und weiterzuschreiben erzeugt weiter eine zweite Geschichte derselben Kette;
+  der Weg ist dann derselbe: neu aufsetzen, bestätigen, abgleichen, alten Schlüssel widerrufen.
 
 ## E6 — Verschlüsselung des Speichers · *entschieden (2026-10-31)*
 
@@ -144,6 +144,11 @@ abgeleitet. **Empfehlung: SQLite behalten und verschlüsseln, keine neue Datenba
 
 Alternative, falls SQLCipher in Tauri mobil Probleme macht: Inhalte vor dem Speichern einzeln verschlüsseln
 (z. B. XChaCha20-Poly1305). Mehr Arbeit, aber unabhängig von der Datenbank.
+
+**Umgesetzt auf dem Heimserver (2026-11-10, H5a):** SQLCipher mit einem zufälligen Schlüssel aus `SYMBIOT_DB_KEY`
+(Secret), Dateien einzeln versiegelt mit XChaCha20-Poly1305, Geräteschlüssel in der Datenbank. Ein bestehender
+Bestand wird beim ersten Start mit Schlüssel umgestellt. Offen: die Apps (Schlüsselbund) und die
+Ende-zu-Ende-Verschlüsselung von Backup und Sync für einen gehosteten Ort.
 
 ## E7 — Adapter und Plugins · *entschieden (2026-10-31)*
 

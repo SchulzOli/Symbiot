@@ -89,6 +89,10 @@ pub struct Report {
     pub files_sent: usize,
     #[serde(default)]
     pub files_received: usize,
+    /// Entries of other devices' chains this device handed to the home server because it did
+    /// not have them (H5): after a loss, any device brings a new home server up to date.
+    #[serde(default)]
+    pub relayed: usize,
 }
 
 /// Entries per push, so a large import does not become one huge request.
@@ -303,6 +307,33 @@ pub fn sync(store: &Mutex<Store>, remote: &Remote) -> Result<Report, Error> {
         let Some(last) = page.last() else { break };
         after = Some(last.head.seq);
         report.sent += remote.push(store, &page)?.received;
+    }
+
+    // H5: every device is a full copy. What the home server lacks of the other chains this
+    // device holds — the adapters', the other devices', an earlier home server's — goes there
+    // too, so a home server set up anew gets everything back from any one device. A chain it
+    // refuses (a revoked device, its own former self) does not stop the rest.
+    // The lock is released before the loop: each step takes it again.
+    let ours = lock(store).heads()?;
+    for head in ours.iter().filter(|h| h.author != me) {
+        let there = theirs
+            .iter()
+            .find(|h| h.author == head.author)
+            .map(|h| h.seq);
+        if there.is_some_and(|s| s >= head.seq) {
+            continue;
+        }
+        let mut after = there;
+        loop {
+            let page = lock(store).chain_page(&head.author, after, PUSH_CHUNK)?;
+            let Some(last) = page.last() else { break };
+            after = Some(last.head.seq);
+            match remote.push(store, &page) {
+                Ok(pushed) => report.relayed += pushed.received,
+                Err(Error::Remote(_)) => break,
+                Err(e) => return Err(e),
+            }
+        }
     }
 
     for head in theirs.iter().filter(|h| h.author != me) {

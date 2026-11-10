@@ -18,6 +18,8 @@ services:
       # M3: KI über LiteLLM auf dem Heimserver. Schlüssel (SYMBIOT_AI_KEY) steht nur in ./.env, nie hier.
       SYMBIOT_AI_URL: "http://127.0.0.1:8085/v1"
       SYMBIOT_AI_MODEL: "qwen3:8b"
+      # H5: Verschlüsselung. SYMBIOT_DB_KEY (openssl rand -hex 32) steht nur in ./.env, nie hier.
+      # Einrichten und was es schützt: docs/BETRIEB.md, Abschnitt „Verschlüsselung“.
     env_file:
       - path: ./.env
         required: false

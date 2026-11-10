@@ -72,6 +72,9 @@ Ein Gedächtnis auf allen Geräten.
 - **Fertig, wenn:** Offline am PC angelegte Knoten nach dem Wiederverbinden auf dem Heimserver und auf dem zweiten Gerät erscheinen. Eine manipulierte Kette wird abgelehnt.
   ✅ `apps/server/tests/sync.rs` (Heimserver als echter Server, zwei Geräte), `e2e/tests/geraete.spec.ts` (Einrichtung).
   Nicht in M4: Checkpoints und `Witness`-Einträge (E13), Verschlüsselung (E6).
+- **H5b (2026-11-10):** Geräte senden dem Heimserver auch die Ketten anderer Geräte und Adapter, die ihm fehlen.
+  Ein neu aufgesetzter Heimserver hat nach einem Abgleich mit einem Gerät alles wieder.
+  ✅ `a_new_home_server_gets_everything_back_from_one_device` in `apps/server/tests/sync.rs`.
 - **H6a (2026-11-10):** Im Browser entstehen die Wörter in der Seite und werden dort zur Signatur
   (`POST /api/person/certify` und `/revoke` nehmen nur die fertige Signatur). ✅ `e2e/tests/geraete.spec.ts`.
 - **H3 (2026-11-10):** Ein Empfang prüft nur die neuen Einträge gegen die Spitze der Kette und liest keine

@@ -29,6 +29,7 @@ use symbiot_core::{
 const SCHEMA_VERSION: i64 = 11;
 
 mod actions;
+mod crypt;
 mod evidence;
 mod files;
 mod persons;
@@ -36,6 +37,7 @@ mod sources;
 mod sync;
 
 pub use actions::{Executed, Outcome};
+pub use crypt::StoreKey;
 pub use evidence::{EvidenceQuery, Origin, Recorded, StoredEvidence};
 pub use files::{FileInfo, MAX_FILE_BYTES};
 pub use persons::{Identifier, Person, Suggestion};
@@ -96,6 +98,8 @@ pub struct Store {
     set_aside: Option<PathBuf>,
     /// Folder of the file store (#28); `None` for a store in memory.
     files: Option<PathBuf>,
+    /// E6: seals the files of the file store; `None` for a store without a key.
+    file_key: Option<crypt::FileKey>,
 }
 
 /// Reads the device's signing seed, creating it on first start. Back this file up: it is the device identity.
@@ -129,7 +133,32 @@ fn now_ms() -> u64 {
 impl Store {
     /// Opens (or creates) `<dir>/symbiot.db` with the device key `<dir>/device.key`.
     pub fn open_dir(dir: &Path) -> Result<Self> {
+        Self::open_dir_with(dir, None)
+    }
+
+    /// Like [`Store::open_dir`], encrypted with `key` (E6): the database file with SQLCipher,
+    /// the files of the file store sealed, and the device key inside the database instead of
+    /// in a file of its own. A store that was unencrypted so far is converted on the spot.
+    /// Without a key everything stays as it was.
+    pub fn open_dir_with(dir: &Path, key: Option<&StoreKey>) -> Result<Self> {
         std::fs::create_dir_all(dir).map_err(|_| Error::Invalid("Datenordner nicht anlegbar"))?;
+        let db = dir.join("symbiot.db");
+        match key {
+            #[cfg(feature = "encryption")]
+            Some(key) => return encrypted::open(dir, key),
+            #[cfg(not(feature = "encryption"))]
+            Some(_) => {
+                return Err(Error::Invalid(
+                    "Diese Version wurde ohne Verschlüsselung gebaut",
+                ));
+            }
+            None if !is_plain(&db) => {
+                return Err(Error::Invalid(
+                    "Die Datenbank ist verschlüsselt. Der Schlüssel fehlt (SYMBIOT_DB_KEY)",
+                ));
+            }
+            None => {}
+        }
         let seed = load_or_create_seed(&dir.join("device.key"))
             .map_err(|_| Error::Invalid("Geräteschlüssel nicht lesbar"))?;
         let mut store = Self::open(&dir.join("symbiot.db"), Signer::from_seed(seed))?;
@@ -265,6 +294,7 @@ impl Store {
             signer,
             set_aside: None,
             files: None,
+            file_key: None,
         })
     }
 
@@ -707,8 +737,9 @@ fn insert_entry(tx: &Connection, entry: &LedgerEntry) -> Result<()> {
     Ok(())
 }
 
-/// H3: gives a ledger written before schema 11 its `kind` and `ts_ms` columns (read from the
-/// signed heads) and fills `chain_tip`. A ledger that has them is left alone.
+/// H3: gives a ledger written before schema 11 its `kind` and `ts_ms` columns and fills them —
+/// for every entry that has none yet — from the signed heads; then fills `chain_tip`. A
+/// ledger that has them all is left alone.
 fn index_ledger(conn: &Connection) -> Result<()> {
     let has_kind: i64 = conn.query_row(
         "SELECT COUNT(*) FROM pragma_table_info('ledger') WHERE name = 'kind'",
@@ -721,21 +752,22 @@ fn index_ledger(conn: &Connection) -> Result<()> {
             "ALTER TABLE ledger ADD COLUMN kind INTEGER NOT NULL DEFAULT 0;
              ALTER TABLE ledger ADD COLUMN ts_ms INTEGER NOT NULL DEFAULT 0;",
         )?;
-        let mut read = tx.prepare("SELECT rowid, head FROM ledger")?;
+    }
+    tx.execute_batch("CREATE INDEX IF NOT EXISTS ledger_kind ON ledger (kind, author, seq);")?;
+    {
+        // No kind is 0, so 0 means „not filled in yet“.
+        let mut read = tx.prepare("SELECT rowid, head FROM ledger WHERE kind = 0")?;
         let mut write = tx.prepare("UPDATE ledger SET kind = ?2, ts_ms = ?3 WHERE rowid = ?1")?;
-        let mut rows = read.query([])?;
-        while let Some(row) = rows.next()? {
-            let head: Head = postcard::from_bytes(&row.get::<_, Vec<u8>>(1)?)?;
-            write.execute(params![
-                row.get::<_, i64>(0)?,
-                head.kind as i64,
-                head.ts_ms as i64
-            ])?;
+        let todo: Vec<(i64, Vec<u8>)> = read
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        for (rowid, head) in todo {
+            let head: Head = postcard::from_bytes(&head)?;
+            write.execute(params![rowid, head.kind as i64, head.ts_ms as i64])?;
         }
     }
     tx.execute_batch(
-        "CREATE INDEX IF NOT EXISTS ledger_kind ON ledger (kind, author, seq);
-         INSERT OR IGNORE INTO chain_tip (author, seq, hash, ts_ms)
+        "INSERT OR IGNORE INTO chain_tip (author, seq, hash, ts_ms)
              SELECT author, seq, hash, ts_ms FROM ledger AS l
              WHERE seq = (SELECT MAX(seq) FROM ledger WHERE author = l.author);",
     )?;
@@ -1039,6 +1071,203 @@ fn rebuild_projection(tx: &Connection, me: &PubKey) -> Result<()> {
         )?;
     }
     Ok(())
+}
+
+/// Whether `db` is an unencrypted SQLite file — or not there yet, or empty.
+fn is_plain(db: &Path) -> bool {
+    use std::io::Read as _;
+    let mut head = [0u8; 16];
+    match std::fs::File::open(db).and_then(|mut f| f.read(&mut head)) {
+        Ok(0) | Err(_) => true,
+        Ok(n) => &head[..n] == b"SQLite format 3\0",
+    }
+}
+
+/// E6: the store with a key. Compiled only with SQLCipher (feature `encryption`).
+#[cfg(feature = "encryption")]
+mod encrypted {
+    use std::fs;
+    use std::path::Path;
+
+    use rusqlite::{Connection, OptionalExtension};
+    use symbiot_core::Signer;
+
+    use super::{Error, Result, Store, StoreKey, evidence, index_ledger, is_plain, sources};
+
+    /// Opens a database file with `key`. Fails if the key does not fit.
+    fn keyed(db: &Path, key: &StoreKey) -> Result<Connection> {
+        let conn = Connection::open(db)?;
+        conn.execute_batch(&key.pragma())?;
+        conn.query_row("SELECT COUNT(*) FROM sqlite_master", [], |_| Ok(()))
+            .map_err(|_| Error::Invalid("Der Schlüssel passt nicht zu dieser Datenbank"))?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS secret (name TEXT PRIMARY KEY, value BLOB NOT NULL);",
+        )?;
+        Ok(conn)
+    }
+
+    /// The device's signing seed, kept inside the encrypted database. A seed still lying in
+    /// `device.key` from before is taken over; the caller removes the file afterwards.
+    fn seed(conn: &Connection, file: &Path) -> Result<[u8; 32]> {
+        let stored: Option<Vec<u8>> = conn
+            .query_row(
+                "SELECT value FROM secret WHERE name = 'device.key'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let bad = || Error::Invalid("Geräteschlüssel nicht lesbar");
+        if let Some(seed) = stored {
+            return seed.try_into().map_err(|_| bad());
+        }
+        let seed: [u8; 32] = match fs::read(file) {
+            Ok(bytes) => bytes.try_into().map_err(|_| bad())?,
+            Err(_) => {
+                let mut seed = [0u8; 32];
+                getrandom::fill(&mut seed).map_err(|_| Error::Invalid("kein Zufall verfügbar"))?;
+                seed
+            }
+        };
+        conn.execute(
+            "INSERT INTO secret (name, value) VALUES ('device.key', ?1)",
+            [seed.as_slice()],
+        )?;
+        Ok(seed)
+    }
+
+    /// Overwrites a file before removing it, so its content does not linger in freed blocks
+    /// (as far as the file system allows).
+    fn wipe(path: &Path) {
+        if let Ok(len) = fs::metadata(path).map(|m| m.len()) {
+            if let Ok(mut f) = fs::OpenOptions::new().write(true).open(path) {
+                use std::io::Write as _;
+                let zeros = vec![0u8; 64 * 1024];
+                let mut left = len;
+                while left > 0 {
+                    let n = left.min(zeros.len() as u64) as usize;
+                    if f.write_all(&zeros[..n]).is_err() {
+                        break;
+                    }
+                    left -= n as u64;
+                }
+                let _ = f.sync_all();
+            }
+            let _ = fs::remove_file(path);
+        }
+    }
+
+    fn side(db: &Path, suffix: &str) -> std::path::PathBuf {
+        let mut p = db.as_os_str().to_owned();
+        p.push(suffix);
+        p.into()
+    }
+
+    pub(super) fn open(dir: &Path, key: &StoreKey) -> Result<Store> {
+        let db = dir.join("symbiot.db");
+        let pending = dir.join("symbiot.db.enc");
+        let old = dir.join("symbiot.db.plain");
+        let seed_file = dir.join("device.key");
+
+        // A conversion that was interrupted between its two renames: finish it.
+        if !db.exists() && pending.exists() && old.exists() {
+            fs::rename(&pending, &db)
+                .map_err(|_| Error::Invalid("Umstellung nicht abschließbar"))?;
+        }
+        for stale in [
+            side(&pending, ""),
+            side(&pending, "-wal"),
+            side(&pending, "-shm"),
+        ] {
+            let _ = fs::remove_file(stale);
+        }
+        if db.exists() && is_plain(&db) && fs::metadata(&db).is_ok_and(|m| m.len() > 0) {
+            convert(&db, &pending, &old, &seed_file, key)?;
+        }
+        wipe(&old);
+
+        let conn = keyed(&db, key)?;
+        let seed = seed(&conn, &seed_file)?;
+        wipe(&seed_file);
+        let mut store = Store::init(conn, Signer::from_seed(seed))?;
+        store.files = Some(dir.join("files"));
+        store.file_key = Some(key.for_files());
+        let sealed: Option<Vec<u8>> = store
+            .conn
+            .query_row("SELECT value FROM secret WHERE name = 'files'", [], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        if sealed.is_none() {
+            store.seal_files()?;
+            store.conn.execute(
+                "INSERT INTO secret (name, value) VALUES ('files', x'01')",
+                [],
+            )?;
+        }
+        Ok(store)
+    }
+
+    /// Turns the unencrypted database into an encrypted one. Only the chains are copied —
+    /// they are the truth; everything else is built again from them. The old file stays
+    /// until the new one is complete, then it is overwritten and removed.
+    fn convert(
+        db: &Path,
+        pending: &Path,
+        old: &Path,
+        seed_file: &Path,
+        key: &StoreKey,
+    ) -> Result<()> {
+        {
+            // First as it is, without a key: that brings a store written by an older version
+            // to today's form, whatever version that was. Then everything into the main
+            // file, so it can be read from one place.
+            let dir = db
+                .parent()
+                .ok_or(Error::Invalid("Datenordner nicht lesbar"))?;
+            let plain = Store::open_dir_with(dir, None)?;
+            plain
+                .conn
+                .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        }
+        let conn = keyed(pending, key)?;
+        let seed = seed(&conn, seed_file)?;
+        let store = Store::init(conn, Signer::from_seed(seed))?;
+        let path = db
+            .to_str()
+            .ok_or(Error::Invalid("Pfad der Datenbank nicht lesbar"))?;
+        store
+            .conn
+            .execute("ATTACH DATABASE ?1 AS plain KEY ''", [path])?;
+        store.conn.execute_batch(
+            "INSERT INTO ledger (author, seq, hash, sig, head, content)
+                 SELECT author, seq, hash, sig, head, content FROM plain.ledger;
+             INSERT OR IGNORE INTO forks SELECT author, seq, hash, entry FROM plain.forks;
+             DETACH DATABASE plain;",
+        )?;
+        index_ledger(&store.conn)?;
+        let tx = store.conn.unchecked_transaction()?;
+        super::rebuild_projection(&tx, &store.signer.public())?;
+        evidence::rebuild_evidence(&tx)?;
+        sources::prune_revoked(&tx)?;
+        tx.commit()?;
+        store
+            .conn
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        drop(store);
+
+        let moved =
+            |_| Error::Invalid("Umstellung auf die verschlüsselte Datenbank fehlgeschlagen");
+        fs::rename(db, old).map_err(moved)?;
+        for suffix in ["-wal", "-shm"] {
+            let _ = fs::remove_file(side(db, suffix));
+        }
+        fs::rename(pending, db).map_err(moved)?;
+        for suffix in ["-wal", "-shm"] {
+            let _ = fs::remove_file(side(pending, suffix));
+        }
+        wipe(old);
+        Ok(())
+    }
 }
 
 /// A v1 database: no schema version yet, and the whole entry in one `entry` column.

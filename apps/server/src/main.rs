@@ -41,9 +41,16 @@ async fn main() {
 
     let data = PathBuf::from(env("SYMBIOT_DATA", "data"));
     let ui = std::env::var("SYMBIOT_UI").ok().map(PathBuf::from);
-    let store = symbiot_store::Store::open_dir(&data)
+    // E6: with SYMBIOT_DB_KEY (or SYMBIOT_DB_KEY_FILE) the database and the files are encrypted.
+    let key = symbiot_store::StoreKey::from_env().unwrap_or_else(|e| panic!("{e}"));
+    let store = symbiot_store::Store::open_dir_with(&data, key.as_ref())
         .unwrap_or_else(|e| panic!("cannot open store in {}: {e}", data.display()));
-    tracing::info!(device = %store.device(), data = %data.display(), ui = ?ui, "store opened");
+    tracing::info!(device = %store.device(), data = %data.display(), ui = ?ui, encrypted = key.is_some(), "store opened");
+    if key.is_none() {
+        tracing::warn!(
+            "the store is not encrypted: set SYMBIOT_DB_KEY (openssl rand -hex 32), see docs/BETRIEB.md"
+        );
+    }
     if let Some(old) = store.set_aside_v1() {
         tracing::warn!(file = %old.display(), "old v1 database set aside, starting a fresh v2 chain");
     }
