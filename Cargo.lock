@@ -4525,7 +4525,7 @@ dependencies = [
 
 [[package]]
 name = "symbiot-ai"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4536,7 +4536,7 @@ dependencies = [
 
 [[package]]
 name = "symbiot-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "ed25519-dalek",
  "hex",
@@ -4549,7 +4549,7 @@ dependencies = [
 
 [[package]]
 name = "symbiot-desktop"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -4564,7 +4564,7 @@ dependencies = [
 
 [[package]]
 name = "symbiot-import"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "axum",
  "hex",
@@ -4582,7 +4582,7 @@ dependencies = [
 
 [[package]]
 name = "symbiot-server"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -4607,7 +4607,7 @@ dependencies = [
 
 [[package]]
 name = "symbiot-store"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chacha20poly1305",
  "getrandom 0.4.3",
@@ -4625,7 +4625,7 @@ dependencies = [
 
 [[package]]
 name = "symbiot-sync"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "hex",
  "serde",
@@ -4639,7 +4639,7 @@ dependencies = [
 
 [[package]]
 name = "symbiot-ui"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "console_error_panic_hook",
  "gloo-net 0.7.0",
@@ -4656,7 +4656,7 @@ dependencies = [
 
 [[package]]
 name = "symbiot-words"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bip39",
  "symbiot-core",

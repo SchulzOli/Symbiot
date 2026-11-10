@@ -11,11 +11,11 @@ base64 = "0.23.1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"
-symbiot-ai = { version = "0.3.0", path = "../../crates/symbiot-ai" }
-symbiot-core = { version = "0.3.0", path = "../../crates/symbiot-core" }
-symbiot-import = { version = "0.3.0", path = "../../crates/symbiot-import" }
-symbiot-store = { version = "0.3.0", path = "../../crates/symbiot-store" }
-symbiot-sync = { version = "0.3.0", path = "../../crates/symbiot-sync" }
+symbiot-ai = { version = "0.4.0", path = "../../crates/symbiot-ai" }
+symbiot-core = { version = "0.4.0", path = "../../crates/symbiot-core" }
+symbiot-import = { version = "0.4.0", path = "../../crates/symbiot-import" }
+symbiot-store = { version = "0.4.0", path = "../../crates/symbiot-store" }
+symbiot-sync = { version = "0.4.0", path = "../../crates/symbiot-sync" }
 tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "net", "signal"] }
 tower-http = { version = "0.7.1", features = ["fs", "trace"] }
 tracing = "0.1.44"
@@ -24,10 +24,10 @@ tracing-subscriber = { version = "0.3.23", features = ["json", "env-filter"] }
 # E6: SQLCipher for the store. Building it compiles OpenSSL from source (perl, make). The home
 # server runs on Linux; a development machine with Windows builds without it and needs neither.
 [target.'cfg(not(windows))'.dependencies]
-symbiot-store = { version = "0.3.0", path = "../../crates/symbiot-store", features = ["encryption"] }
+symbiot-store = { version = "0.4.0", path = "../../crates/symbiot-store", features = ["encryption"] }
 
 [dev-dependencies]
-symbiot-words = { version = "0.3.0", path = "../../crates/symbiot-words" }
+symbiot-words = { version = "0.4.0", path = "../../crates/symbiot-words" }
 tempfile = "3.27.0"
 http-body-util = "0.1.5"
 tower = { version = "0.5.3", features = ["util"] }

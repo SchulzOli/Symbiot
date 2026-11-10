@@ -8,4 +8,4 @@ description = "The 24 recovery words of the person key (E5): the same on every d
 
 [dependencies]
 bip39 = "2"
-symbiot-core = { version = "0.3.0", path = "../symbiot-core" }
+symbiot-core = { version = "0.4.0", path = "../symbiot-core" }
