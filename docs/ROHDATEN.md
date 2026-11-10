@@ -158,5 +158,8 @@ Entscheidungen vorschlagen (E16), ausgeführt werden sie erst nach Bestätigung.
 - Import aus der App lädt keine Medien neben dem Export (Fotos eines WhatsApp-Exports); dafür weiter
   `symbiot-import` mit dem Ordner. Git braucht den Ordner des Repositorys und geht nur über `symbiot-import`.
 - Live-Adapter (M9).
+- Der Abgleich wird mit der Menge der Rohdaten langsamer (PLAN H3).
+- Der Import aus der App lädt in die Kette des Geräts, an dem man sitzt, nicht in eine eigene Adapter-Kette wie
+  `symbiot-import` (Abweichung von E7 und E13, PLAN H6).
 - Dateien sind wie die Datenbank noch unverschlüsselt (E6, #22).
 - Jedes Gerät lädt beim Abgleich alle fehlenden Dateien. Eine Auswahl (z. B. Fotos nur auf dem Heimserver) fehlt.

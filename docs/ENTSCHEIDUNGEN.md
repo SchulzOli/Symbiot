@@ -1,6 +1,6 @@
 # Entscheidungen
 
-Stand: 2026-11-08. Jede Entscheidung hat einen Status: **entschieden** (vom Besitzer), **Vorschlag** (wartet auf
+Stand: 2026-11-10. Jede Entscheidung hat einen Status: **entschieden** (vom Besitzer), **Vorschlag** (wartet auf
 den Besitzer) oder **offen**. Was hier entschieden ist, gilt vor PLAN.md und FEATURES.md, bis diese nachgezogen sind.
 
 ## E1 — Symbiot und Connect sind ein System · *entschieden*
@@ -35,6 +35,11 @@ bleibt), und `verify()` bestätigt die Kette trotzdem. Geräte, die eine Kopie h
 auf. Ein fremdes Gerät kann dazu nicht gezwungen werden – das gilt für jede Löschung in einem verteilten
 System und muss in der Oberfläche ehrlich so stehen.
 
+**Bekannte Lücken (2026-11-10, PLAN H1):** Weggeräumt wird heute nur, was im Verlauf des Knotens steht. Sein Text
+bleibt in der Kette, wenn er auch in einem Vorschlag des Assistenten (`DecideSuggestion`) oder einem abgelehnten
+Vorschlag (`RejectProposal`) steht, und wenn ein anderes Gerät den Knoten nach dem Löschen noch bearbeitet hat
+(der Eintrag wird übersprungen, sein Inhalt bleibt).
+
 ## E3 — „Löschbar“ und „exportierbar“ entscheidet der Mensch, pro Knoten · *entschieden, umgesetzt*
 
 - Bei jedem neuen Knoten lässt sich festlegen, ob er **löschbar** und ob er **exportierbar** ist.
@@ -49,12 +54,23 @@ eigenen Eintrag (`SetPolicy { node, deletable, exportable }`), den die Projektio
 |---|---|
 | löschbar | Löschmarker + Inhalt wird weggeräumt (E2) |
 | nicht löschbar | Löschmarker blendet nur aus, Inhalt bleibt in der Kette (z. B. für Belege, die bewiesen bleiben müssen) |
-| exportierbar | erscheint in Export und Sync zu Geräten anderer Menschen |
-| nicht exportierbar | bleibt auf den eigenen Geräten, verlässt sie nie (auch nicht zur gehosteten KI) |
+| exportierbar | gleicht mit den eigenen Geräten ab, darf ins Backup, zu einer gehosteten KI und später zu Geräten anderer Menschen |
+| nicht exportierbar | bleibt auf dem einen Gerät, auf dem er entstand: kein Abgleich, kein Backup, keine gehostete KI (siehe E5) |
 
 **Entschieden:** Eine Richtlinie darf später verschärft und auch gelockert werden (nicht löschbar → löschbar).
 Jede Änderung ist ein neuer signierter `SetPolicy`-Eintrag, im Verlauf sichtbar. „Nicht löschbar“ bedeutet
 damit: nicht löschbar, solange der Mensch es nicht ändert.
+
+**Drei Reichweiten, damit die Begriffe eindeutig sind (2026-11-10):**
+
+| Reichweite | Gilt für | Wirkung |
+|---|---|---|
+| nur dieses Gerät | Knoten mit „nicht exportierbar“ | Der Inhalt verlässt das Gerät nie. Andere Geräte sehen nur den Kopf des Eintrags. |
+| eigene Geräte | sensible Knoten (E4), alle Rohdaten (E14) | Abgleich zwischen den eigenen Geräten ja, externe KI und andere Menschen nein. |
+| darf hinaus | alles andere | Darf an eine gehostete KI hinter dem Masken-Filter gehen. |
+
+**Bekannte Lücke (2026-11-10, PLAN H2):** Entsteht ein nicht exportierbarer Knoten über den Assistenten, geht sein
+Text im Inhalt des `DecideSuggestion`-Eintrags an die anderen Geräte.
 
 ## E4 — Was ist sensibel? · *entschieden, umgesetzt*
 
@@ -99,6 +115,14 @@ Ansatz. Wichtig: Der **Geräteschlüssel wird dabei nicht mit umgezogen.**
 **Folge, die die Oberfläche klar sagen muss:** „Nicht exportierbar“ heißt, der Knoten lebt nur auf diesem
 einen Gerät. Geht das Gerät verloren, ist er weg. Beim Setzen des Schalters erscheint dieser Hinweis.
 
+**Abweichungen (2026-11-10, PLAN H5 und H6):**
+- Die Wörter sind öfter unterwegs, als „nie gespeichert“ nahelegt: Die Web-Oberfläche schickt sie an den Heimserver,
+  der damit signiert, und jeder Import-Adapter braucht sie einmal (`SYMBIOT_WORDS`).
+- BETRIEB.md empfiehlt, `device.key` des Heimservers zu sichern. Wer ein älteres Backup zurückspielt und
+  weiterschreibt, erzeugt eine zweite Geschichte derselben Kette; die Geräte lehnen sie dauerhaft ab. Der Weg
+  „neuer Geräteschlüssel, bestätigen, alles wieder holen“ fehlt noch: Geräte senden heute nur ihre eigene Kette,
+  ein neu aufgesetzter Heimserver bekäme die Ketten der Adapter und seine alte Kette nicht zurück.
+
 ## E6 — Verschlüsselung des Speichers · *entschieden (2026-10-31)*
 
 Ja, SQLite ist heute der einzige Speicher: Die Kette ist dort die Wahrheit, Knoten und Kanten sind daraus
@@ -132,6 +156,11 @@ Matrix lesend, dazu ein MCP-Server von Symbiot (nur lesen und vorschlagen).
 
 **Ergänzt durch E14:** Adapter gehören zur Integrationsschicht: Sie laden Rohdaten und deuten nichts. Aufbereiter
 sind eine zweite Art von Gerät, die aus Rohdaten Dinge ableitet. Die ersten Adapter sind Importe (M7).
+
+**Abweichung (2026-11-10, PLAN H6):** Der Import aus der App (#44) lädt Rohdaten in die Kette des Geräts, an dem
+man sitzt, also eines Menschen-Geräts. Das widerspricht „ein Adapter ist ein Gerät“ und E13 („gebündelt wird nur
+bei Maschinen“). Noch zu entscheiden: so lassen und E7 anpassen, oder der App pro Quelle einen eigenen
+Adapter-Schlüssel geben.
 
 ## E10 — Belege von Adaptern werden Knoten · *entschieden*
 
@@ -375,7 +404,7 @@ Gewünscht vom Besitzer: benutzerfreundlich, modern, leicht zu bedienen, barrier
 
 Später: Personen und Rohdaten als Karten auf dem Canvas, Gruppen und Rahmen, Minikarte.
 
-## E16 — Was der Mensch kann, kann die KI vorschlagen · *entschieden (2026-11-08), Umsetzung als Vorschlag*
+## E16 — Was der Mensch kann, kann die KI vorschlagen · *entschieden (2026-11-08), umgesetzt (#42)*
 
 Gewünscht vom Besitzer: Alles, was der Mensch tun kann, soll die KI mit Bestätigung des Menschen genauso tun
 können. Das verschärft die Grundregel nicht, es macht sie vollständig: Die KI schlägt vor, der Mensch entscheidet,
@@ -410,6 +439,8 @@ und zwar für **jede** Handlung, nicht nur für „nächster Schritt“ und „R
 - **Bewusst nicht enthalten:** Personen-Schlüssel und Geräte (die 24 Wörter erreichen nie eine KI), Importe.
 - Noch offen: Vorschläge als Karte im Canvas, derselbe Katalog als MCP-Werkzeuge (#25), die Oberfläche selbst
   über dieselben Aktionen statt über eigene Aufrufe.
+- Lücke (2026-11-10): Der Katalog bietet der KI auch Personen und Quellen an (`merge_identities`, `grant_source`),
+  ihr Kontext enthält aber weder Personen noch Quellen. Solche Vorschläge kann sie heute nur raten.
 
 ## E17 — Langflow für die Pipelines? · *Vorschlag (2026-11-08): nein*
 
@@ -431,6 +462,29 @@ soll. Empfehlung: **nicht einbauen.**
 und bearbeiten: Quellen und Aufbereiter als Karten, Verbindungen als Datenfluss, Zustand und letzte Läufe an
 der Karte. Wer Langflow trotzdem nutzt, kann es später als externe Quelle über MCP anbinden, ohne Zugriff auf die
 Ketten.
+
+## E18 — Härtung vor neuen Features · *entschieden (2026-11-10)*
+
+Eine Durchsicht von Plan und Code am 2026-11-10 ergab: Breite kam vor Tiefe. M5, M7, das halbe M8, E15 und E16
+sind auf `main`, während Zusagen aus E2, E3, E5 und E6 noch nicht halten und die Checkpoints M3 und M7 nie
+abgenommen wurden. Seit den Importen liegen echte Nachrichten anderer Menschen unverschlüsselt auf Heimserver und
+Handy.
+
+Entschieden:
+- **Erst härten.** Der Meilenstein H in [PLAN.md](PLAN.md) kommt vor allem anderen. Solange er offen ist, kommt
+  keine neue Datenquelle und keine neue Aufbereitung dazu.
+- **Zusagen sind Tests.** Was eine Entscheidung verspricht, bekommt einen Test über alle Wege, auf denen Daten
+  entstehen (von Hand, über den Assistenten, über den Abgleich, über einen Import).
+- **Checkpoints werden nachgeholt**, bevor M8 weitergeht: eine Woche selbst benutzen (M3) und ein echtes Jahr Chat
+  und Git (M7).
+- **Messen vor Bauen.** M8 beginnt mit einer Messung des lokalen Modells an echten, von Hand markierten
+  Nachrichten. M9 beginnt mit einer Messung, ob SQLite für die Auswertungen reicht.
+- **M6 (Sensor) rückt ans Ende.** Er beantwortet keine der Fragen aus E14; die `no_std`-Garantie hält die CI.
+
+Nachgewiesen mit Experimenten: Text gelöschter Knoten in Einträgen der Arten 28, 5 und 2; Text eines nicht
+exportierbaren Knotens im Abgleich (Art 28); Kosten eines Empfangs wachsen linear mit den gespeicherten Rohdaten
+(0,2 s bei 50 000 Nachrichten, 0,5 s bei 200 000, für einen einzigen neuen Eintrag). Aus dem Code gelesen:
+`POST /api/import` ohne Prüfung der Herkunft; Backup und Wiederherstellung des Heimservers.
 
 ## E8 — Zurückgestellt · *entschieden*
 

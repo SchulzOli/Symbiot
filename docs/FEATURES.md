@@ -26,6 +26,10 @@ Nichts wird heimlich verändert.
 - **Fertig, wenn:** Nach dem Löschen steht der Text nicht mehr in der Datenbankdatei und „Kette prüfen“ ist ok.
   ✅ `crates/symbiot-store` (`deleting_removes_the_content_from_the_file`), `apps/server/tests/api.rs`,
   `e2e/tests/verknuepfen.spec.ts`.
+- **Bekannte Lücken (2026-11-10, PLAN H1 und H2):** Der Test deckt nur Knoten ab, die von Hand entstanden. Der Text
+  bleibt in der Kette, wenn er auch in einem Vorschlag des Assistenten (Art 28) oder einem abgelehnten Vorschlag
+  (Art 5) steht, und wenn ein anderes Gerät den Knoten nach dem Löschen noch bearbeitet hat. Ein nicht exportierbarer
+  Knoten, der über den Assistenten entstand, verlässt das Gerät mit dem Vorschlag.
 
 ## F3 — Verknüpfen *(M2)*
 Zusammenhänge sichtbar machen.
@@ -67,16 +71,24 @@ Ein Gedächtnis auf allen Geräten.
 - **Fertig, wenn:** Offline am PC angelegte Knoten nach dem Wiederverbinden auf dem Heimserver und auf dem zweiten Gerät erscheinen. Eine manipulierte Kette wird abgelehnt.
   ✅ `apps/server/tests/sync.rs` (Heimserver als echter Server, zwei Geräte), `e2e/tests/geraete.spec.ts` (Einrichtung).
   Nicht in M4: Checkpoints und `Witness`-Einträge (E13), Verschlüsselung (E6).
+- **Bekannte Lücke (2026-11-10, PLAN H3):** Jeder Empfang prüft die ganze Kette von vorn und baut die Projektion
+  neu. Der Abgleich wird deshalb mit der Menge der Rohdaten langsamer.
 
 ## F6 — Überall *(M5)*
 Symbiot auf dem Handy.
 - Android-Build aus derselben Codebasis, im Release als signiertes APK.
 - **Fertig, wenn:** Ein Ziel am Handy angelegt wird und am PC erscheint.
+  Stand: Die App baut in der CI (`apps/desktop/android.sh`), jeder Pull Request liefert ein Test-APK. Offen: Release
+  mit dem signierten APK und die Probe am echten Handy (PLAN H7).
 
 ## F7 — Sensor *(M6)*
 Belege, die kein Mensch eintippen muss.
 - ESP32-C3 mit `symbiot-core`, eigener Schlüssel, sendet signierte Messwerte an den Heimserver.
 - **Fertig, wenn:** Ein Messwert als Beleg-Knoten erscheint und `Kette prüfen` die Kette des Sensors bestätigt.
+
+## Lebensgraph und Assistent *(M7, M8, E16)*
+Rohdaten, Importe, Zeitleiste, Suche, Personen und Quellen stehen in [ROHDATEN.md](ROHDATEN.md), der Assistent in
+[E16](ENTSCHEIDUNGEN.md).
 
 ## Später (Phase WIR / ALLE)
 Personen-Graph und Vertrauensräume (GraphFamiliy, TrustInHumanity) · Einwilligungen pro Knoten und Person · Konsens-Werkzeug (IchWillNichtStreiten) · gemeinsamer Ledger (AGORA).

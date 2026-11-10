@@ -1,6 +1,6 @@
 # Tech-Stack — Entscheidungen
 
-Stand: 2026-10-30 · ersetzt die Supabase-Entscheidung vom 2026-08-09 (`TrustInAI/_Overview/TECH-STACK.md`).
+Stand: 2026-10-30, Aufbau nachgezogen am 2026-11-10 · ersetzt die Supabase-Entscheidung vom 2026-08-09 (`TrustInAI/_Overview/TECH-STACK.md`).
 
 ## Vorgaben
 
@@ -26,28 +26,32 @@ Stand: 2026-10-30 · ersetzt die Supabase-Entscheidung vom 2026-08-09 (`TrustInA
 | KI | **LiteLLM auf dem Heimserver** (OpenAI-kompatibel) | lokale Modelle (z. B. qwen3) als Standard. Claude nur über einen Masken-Filter |
 | Logs | `tracing` (JSON) | zum Beispiel Dozzle liest und alarmiert |
 | Lint / Format | `rustfmt` + `clippy -D warnings` | ein Werkzeug, keine Diskussion |
-| Tests | `cargo test` + `proptest` (Ledger) + axum-Integrationstests | Playwright-E2E ab M2 |
+| Tests | `cargo test` + `proptest` (Ledger) + axum-Integrationstests + Playwright-E2E mit axe-core | Zusagen aus den Entscheidungen sind Tests |
 | CI/CD | **GitHub Actions** → **GHCR** → **Komodo** (Auto-Update) | GitHub erreicht den Heimserver nicht, also zieht Komodo das Image selbst |
 | Netz | **Tailscale** (nur Tailnet) | keine offenen Ports nach außen |
 
 ## Architektur
 
 ```
-                ┌──────────────────────── symbiot-core (no_std) ────────────────────────┐
-                │ Node · Edge · Evidence · Proposal · Consent · LedgerEntry · verify()   │
-                └───────────────┬───────────────────────┬───────────────────────┬────────┘
-                                │                       │                       │
-   ESP32 (später)          symbiot-store            symbiot-ai              (alle teilen
-   signiert Belege         SQLite + Projektion      LiteLLM-Client           dieselben Typen)
-        │                       │                       │
-        │          ┌────────────┴────────────┐          │
-        │          │                         │          │
-        │    apps/desktop (Tauri 2)     apps/server (axum) ──► LiteLLM :8085 ──► Ollama / Claude
-        │    Win · mac · Linux          auf dem Heimserver, Docker            (Masken-Filter)
-        │    Android · iOS                   │
-        │          │    UI: apps/ui (Leptos) │ liefert apps/ui auch als Web-App aus
-        │          └──────── Sync ───────────┘
-        └──────────────────── Sync ──────────┘          alles nur über Tailscale
+                ┌──────────────────────────── symbiot-core (no_std) ────────────────────────────┐
+                │ Node · Edge · Evidence · Proposal · Action · LedgerEntry · verify() · replay() │
+                └───────────┬────────────────────────┬───────────────────────────┬───────────────┘
+                            │                        │                           │
+   ESP32 (später)      symbiot-store            symbiot-ai                  symbiot-import
+   signiert Belege     SQLite: Ketten,          LiteLLM-Client,             Adapter: Telegram, WhatsApp,
+        │              Projektion, Dateien      schreibt nie                mbox, Git → Rohdaten
+        │                   │                        │                           │
+        │              symbiot-sync ─────────────────┴───────────────────────────┘
+        │              signierte Anfragen, Ketten und Dateien austauschen
+        │                   │
+        │      ┌────────────┴────────────┐
+        │      │                         │
+        │  apps/desktop (Tauri 2)   apps/server (axum) ──► LiteLLM :8085 ──► Ollama / Claude
+        │  Win · mac · Linux        auf dem Heimserver, Docker            (Masken-Filter)
+        │  Android · später iOS          │
+        │      │  UI: apps/ui (Leptos)   │ liefert apps/ui auch als Web-App aus
+        │      └──────── Sync ───────────┘
+        └──────────────── Sync ──────────┘          alles nur über Tailscale
 ```
 
 ### Die eine Idee, die alles einfach macht: Jedes Gerät hat eine eigene Kette
@@ -84,7 +88,7 @@ rustup default stable-x86_64-pc-windows-msvc
 rustup target add wasm32-unknown-unknown riscv32imc-unknown-none-elf
 ```
 ```bash
-cargo install --locked trunk tauri-cli cargo-nextest
+cargo install --locked trunk tauri-cli
 ```
 Für Tauri unter Windows ist das MSVC-Ziel empfohlen. Dafür braucht es die *Visual Studio Build Tools* (C++). WebView2 bringt Windows 11 schon mit.
 Für Android später: Android Studio mit SDK und NDK. **iOS braucht einen Mac** (oder einen macOS-Runner in GitHub Actions).

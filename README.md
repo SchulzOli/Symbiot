@@ -13,10 +13,10 @@ Hervorgegangen aus dem Ideengarten *TrustInAI*. Benannt nach der *Symbiose Mensc
 
 ## Dokumente
 - [docs/TECH-STACK.md](docs/TECH-STACK.md): Stack, Architektur, Entwicklungsumgebung
-- [docs/PLAN.md](docs/PLAN.md): Meilensteine M0–M6, Lifecycle, Checkpoints
-- [docs/FEATURES.md](docs/FEATURES.md): erste Features F1–F7 mit Abnahmekriterien
+- [docs/PLAN.md](docs/PLAN.md): Stand, Reihenfolge, Meilensteine M0–M10 und Härtung, Lifecycle, Checkpoints
+- [docs/FEATURES.md](docs/FEATURES.md): erste Features F1–F7 mit Abnahmekriterien und bekannten Lücken
 - [docs/BETRIEB.md](docs/BETRIEB.md): Weg eines Commits bis zum Heimserver, Release, Einrichtung, Prüfen
-- [docs/ENTSCHEIDUNGEN.md](docs/ENTSCHEIDUNGEN.md): Entscheidungen E1–E17 (Löschen, Schlüssel, Verschlüsselung, Adapter, Bündeln, Symbiot + Connect, Lebensgraph, Oberfläche, KI-Gleichstellung, Langflow)
+- [docs/ENTSCHEIDUNGEN.md](docs/ENTSCHEIDUNGEN.md): Entscheidungen E1–E18 (Löschen, Schlüssel, Verschlüsselung, Adapter, Bündeln, Symbiot + Connect, Lebensgraph, Oberfläche, KI-Gleichstellung, Langflow, Härtung vor neuen Features)
 - [docs/ROHDATEN.md](docs/ROHDATEN.md): Format der Rohdaten, der Vertrag zwischen Integration und Aufbereitung (E14)
 
 ## Aufbau
@@ -60,6 +60,16 @@ cd apps/desktop && cargo tauri dev
 - **Vor M4:** fertig (v0.2.0): Kettenformat v2 (Protokoll 2) mit Löschen, „löschbar“ und „exportierbar“ pro Knoten (E2, E3, E13)
 - **E4 Sensibel:** Regeln für Sensibles, von der KI vorgeschlagen, von dir angenommen
 - **M4 Synchron:** fertig (v0.3.0): Personen-Schlüssel (E5), Abgleich über den Heimserver, neueste Version gewinnt mit Hinweis, Widerruf. Einrichtung: [BETRIEB.md](docs/BETRIEB.md#abgleich-m4)
+
+Seit v0.3.0 auf `main`, noch ohne Release:
+- **M5 Überall:** Android-App aus derselben Codebasis, APK baut in der CI. Offen: Release mit signiertem APK, Probe am echten Handy
+- **M7 Integration:** Rohdaten-Format, Import aus Telegram, WhatsApp, mbox und Git (Werkzeug und aus der App), Zeitleiste, Volltextsuche, Datei-Speicher, Quellen-Verwaltung. Offen: Checkpoint mit echten Daten
+- **M8 Aufbereitung:** Personen über alle Quellen, Zusammenführen als Entscheidung. Offen: Aussagen, Themen, Fragen in Worten
+- **E15 Oberfläche, E16 Assistent:** Canvas als Startansicht, barrierefrei; die KI schlägt Aktionen vor, du entscheidest
+
+**Als Nächstes: Härtung (E18).** Löschen, „nicht exportierbar“, Abgleich bei vielen Daten, Verschlüsselung und Backup
+halten noch nicht, was die Entscheidungen zusagen. Bis das stimmt, kommt keine neue Datenquelle dazu. Einzelheiten:
+[PLAN.md](docs/PLAN.md#h--härtung-e18--als-nächstes).
 
 End-to-End-Test lokal (braucht `trunk build --release` in `apps/ui`):
 ```bash
